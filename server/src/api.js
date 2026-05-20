@@ -941,7 +941,22 @@ router.put('/team/:id', authMiddleware, requireRole('gestor'), (req, res) => {
 })
 
 router.delete('/team/:id', authMiddleware, requireRole('gestor'), (req, res) => {
-  run('UPDATE users SET active = 0 WHERE id = ? AND company_id = ?', [req.params.id, req.user.company_id])
+  const uid = req.params.id
+  const cid = req.user.company_id
+
+  // Check if this is a direct company member
+  const directMember = get('SELECT id FROM users WHERE id = ? AND company_id = ?', [uid, cid])
+
+  if (directMember) {
+    // Direct member: deactivate
+    run('UPDATE users SET active = 0 WHERE id = ? AND company_id = ?', [uid, cid])
+  } else {
+    // Multi-team membership: remove the membership link
+    run('DELETE FROM team_memberships WHERE user_id = ? AND company_id = ?', [uid, cid])
+    // Also remove any pending invites
+    run("DELETE FROM team_invites WHERE editor_id = ? AND company_id = ?", [uid, cid])
+  }
+
   res.json({ success: true })
 })
 

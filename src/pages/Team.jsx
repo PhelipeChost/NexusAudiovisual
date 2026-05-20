@@ -5,7 +5,7 @@ import theme from '../styles/theme'
 import Modal from '../components/Modal'
 import {
   Icon, Avatar, Spinner, Field,
-  inputStyle, btnPrimary, btnSoft, btnGhost,
+  inputStyle, btnPrimary, btnSoft, btnGhost, btnDanger,
   panelStyle,
 } from '../components/ui'
 
@@ -197,12 +197,17 @@ export default function Team() {
 }
 
 function EditorCard({ member, onRefresh }) {
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [removing, setRemoving] = useState(false)
+
   async function handleRemove() {
-    if (!confirm(`Remover ${member.name} da equipe?`)) return
+    setRemoving(true)
     try {
-      if (api.team.delete) await api.team.delete(member.id)
+      await api.team.delete(member.id)
       onRefresh()
     } catch (err) { alert(err.message) }
+    setRemoving(false)
+    setShowConfirm(false)
   }
 
   const total = member.total_orders ?? 0
@@ -218,6 +223,48 @@ function EditorCard({ member, onRefresh }) {
         position: 'absolute', top: 0, left: 0, right: 0, height: 2,
         background: member.role === 'gestor' ? theme.colors.warm : theme.colors.primary,
       }} />
+
+      {/* Confirmation overlay */}
+      {showConfirm && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 10,
+          background: 'rgba(10, 13, 19, 0.92)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: 24, gap: 14, borderRadius: 14,
+        }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            background: theme.colors.dangerMuted,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name="trash" size={20} color={theme.colors.danger} />
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text, marginBottom: 4 }}>
+              Remover {member.name}?
+            </div>
+            <div style={{ fontSize: 12, color: theme.colors.textMuted, lineHeight: 1.5 }}>
+              {isMembership
+                ? 'O editor sera desvinculado da sua equipe.'
+                : 'O editor sera desativado da plataforma.'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={() => setShowConfirm(false)} style={{ ...btnSoft, padding: '8px 18px', fontSize: 12.5 }} disabled={removing}>
+              Cancelar
+            </button>
+            <button onClick={handleRemove} disabled={removing} style={{
+              ...btnPrimary, padding: '8px 18px', fontSize: 12.5,
+              background: theme.colors.danger, color: '#fff',
+              opacity: removing ? 0.6 : 1,
+            }}>
+              <Icon name="trash" size={12} />
+              {removing ? 'Removendo...' : 'Sim, remover'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -236,7 +283,7 @@ function EditorCard({ member, onRefresh }) {
           </div>
         </div>
         {member.role !== 'gestor' && (
-          <button onClick={handleRemove} title="Remover" style={{ color: theme.colors.textFaint, padding: 6 }}>
+          <button onClick={() => setShowConfirm(true)} title="Remover" style={{ color: theme.colors.textFaint, padding: 6, cursor: 'pointer' }}>
             <Icon name="trash" size={14} />
           </button>
         )}
@@ -258,7 +305,7 @@ function EditorCard({ member, onRefresh }) {
               </div>
             </div>
             <div style={{ borderLeft: `1px solid ${theme.colors.borderSoft}`, paddingLeft: 14 }}>
-              <div className="eyebrow" style={{ fontSize: 9 }}>Concluídos</div>
+              <div className="eyebrow" style={{ fontSize: 9 }}>Concluidos</div>
               <div className="display tnum" style={{ fontSize: 22, marginTop: 4, color: theme.colors.text }}>{completed}</div>
             </div>
             <div style={{ borderLeft: `1px solid ${theme.colors.borderSoft}`, paddingLeft: 14 }}>
