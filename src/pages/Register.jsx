@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import theme from '../styles/theme'
-import { Icon, LogoMark, Field, inputStyle, btnPrimary } from '../components/ui'
+import { Icon, LogoMark, Field, PasswordInput, inputStyle, btnPrimary } from '../components/ui'
 
 export default function Register() {
   const { register } = useAuth()
@@ -134,8 +134,8 @@ export default function Register() {
                 type="email" required placeholder="marina@email.com" style={inputStyle} />
             </Field>
             <Field label="Senha" required hint="Mínimo 6 caracteres">
-              <input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
-                type="password" required minLength={6} placeholder="••••••••" style={inputStyle} />
+              <PasswordInput value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+                required minLength={6} />
             </Field>
 
             {role === 'editor' && (

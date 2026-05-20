@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import theme from '../styles/theme'
-import { Icon, LogoMark, Field, inputStyle, btnPrimary } from '../components/ui'
+import { Icon, LogoMark, Field, PasswordInput, inputStyle, btnPrimary } from '../components/ui'
 
 export default function Login() {
   const { login } = useAuth()
@@ -75,8 +75,7 @@ export default function Login() {
                 type="email" required autoFocus placeholder="seu@email.com" style={inputStyle} />
             </Field>
             <Field label="Senha">
-              <input value={password} onChange={e => setPassword(e.target.value)}
-                type="password" required placeholder="••••••••" style={inputStyle} />
+              <PasswordInput value={password} onChange={e => setPassword(e.target.value)} required />
             </Field>
 
             {error && (

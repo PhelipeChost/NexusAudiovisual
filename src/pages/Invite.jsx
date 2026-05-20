@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import api from '../api'
 import { useAuth } from '../context/AuthContext'
 import theme from '../styles/theme'
-import { Icon, LogoMark, Spinner, Field, inputStyle, btnPrimary } from '../components/ui'
+import { Icon, LogoMark, Spinner, Field, PasswordInput, inputStyle, btnPrimary } from '../components/ui'
 
 export default function Invite() {
   const { token } = useParams()
@@ -107,8 +107,8 @@ export default function Invite() {
               required autoFocus placeholder="Como você quer ser chamado" style={inputStyle} />
           </Field>
           <Field label="Crie uma senha" required hint="Mínimo 6 caracteres">
-            <input value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
-              type="password" required minLength={6} placeholder="••••••••" style={inputStyle} />
+            <PasswordInput value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+              required minLength={6} />
           </Field>
 
           {error && (
