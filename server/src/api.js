@@ -287,6 +287,61 @@ router.post('/client/orders/:id/request-changes', authMiddleware, requireRole('c
   res.json({ success: true })
 })
 
+// Client financial view (read-only)
+router.get('/client/financial', authMiddleware, requireRole('cliente'), (req, res) => {
+  const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente nao vinculado' })
+
+  // All invoices for this client
+  const invoices = all(`
+    SELECT ci.*, GROUP_CONCAT(o.title, ', ') as order_titles, COUNT(cii.id) as item_count
+    FROM client_invoices ci
+    LEFT JOIN client_invoice_items cii ON cii.invoice_id = ci.id
+    LEFT JOIN orders o ON o.id = cii.order_id
+    WHERE ci.client_id = ?
+    GROUP BY ci.id
+    ORDER BY ci.created_at DESC
+  `, [client.id])
+
+  // Orders with values for this client (value only, no editor_value)
+  const orders = all(`
+    SELECT o.id, o.title, o.value, o.updated_at,
+      kc.name as column_name, kc.color as column_color,
+      (SELECT ci.id FROM client_invoice_items cii JOIN client_invoices ci ON ci.id = cii.invoice_id WHERE cii.order_id = o.id LIMIT 1) as invoice_id,
+      (SELECT ci.status FROM client_invoice_items cii JOIN client_invoices ci ON ci.id = cii.invoice_id WHERE cii.order_id = o.id LIMIT 1) as invoice_status
+    FROM orders o
+    LEFT JOIN kanban_columns kc ON kc.id = o.column_id
+    WHERE o.client_id = ?
+    ORDER BY o.updated_at DESC
+  `, [client.id])
+
+  const totalValue = orders.reduce((s, o) => s + (o.value || 0), 0)
+  const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.total_amount || 0), 0)
+  const totalPending = invoices.filter(i => i.status === 'pending').reduce((s, i) => s + (i.total_amount || 0), 0)
+
+  res.json({ invoices, orders, totalValue, totalPaid, totalPending })
+})
+
+// Client get invoice items (read-only)
+router.get('/client/invoices/:id/items', authMiddleware, requireRole('cliente'), (req, res) => {
+  const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente nao vinculado' })
+
+  const invoice = get('SELECT * FROM client_invoices WHERE id = ? AND client_id = ?', [req.params.id, client.id])
+  if (!invoice) return res.status(404).json({ error: 'Fatura nao encontrada' })
+
+  const items = all(`
+    SELECT cii.*, o.title as order_title, o.description, u.name as editor_name, c.name as client_name
+    FROM client_invoice_items cii
+    JOIN orders o ON o.id = cii.order_id
+    LEFT JOIN users u ON u.id = o.editor_id
+    LEFT JOIN clients c ON c.id = o.client_id
+    WHERE cii.invoice_id = ?
+  `, [req.params.id])
+
+  res.json({ invoice, items })
+})
+
 // ============ EDITOR PORTAL ============
 
 router.get('/editor/dashboard', authMiddleware, requireRole('editor'), (req, res) => {

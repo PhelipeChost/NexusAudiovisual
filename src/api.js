@@ -69,6 +69,8 @@ const api = {
     getProjects: () => request('/client/projects'),
     approve: (orderId) => request(`/client/orders/${orderId}/approve`, { method: 'POST' }),
     requestChanges: (orderId, data) => request(`/client/orders/${orderId}/request-changes`, { method: 'POST', body: JSON.stringify(data) }),
+    getFinancial: () => request('/client/financial'),
+    getInvoiceItems: (id) => request(`/client/invoices/${id}/items`),
   },
 
   editorPortal: {

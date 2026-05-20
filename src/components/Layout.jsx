@@ -1,10 +1,14 @@
-// src/components/Layout.jsx — sidebar + topbar + notificações
-import { useState, useEffect, useRef, Fragment } from 'react'
+// src/components/Layout.jsx — sidebar colapsavel + topbar + notificacoes
+import { useState, useEffect, useRef, Fragment, createContext, useContext } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import theme from '../styles/theme'
 import { Icon, Avatar, LogoMark } from './ui'
+
+// Context to share sidebar state with child pages
+export const SidebarContext = createContext({ collapsed: false })
+export function useSidebar() { return useContext(SidebarContext) }
 
 const ALL_NAV_ITEMS = [
   { path: '/', label: 'Panorama',      icon: 'dashboard', roles: ['gestor', 'editor', 'cliente'], end: true },
@@ -12,7 +16,7 @@ const ALL_NAV_ITEMS = [
   { path: '/clients', label: 'Clientes', icon: 'clients', roles: ['gestor'] },
   { path: '/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
   { path: '/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
-  { path: '/settings', label: 'Configurações', icon: 'settings', roles: ['gestor'] },
+  { path: '/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor'] },
 ]
 
 const PAGE_TITLES = {
@@ -21,8 +25,11 @@ const PAGE_TITLES = {
   '/clients': 'Clientes',
   '/team': 'Equipe',
   '/financial': 'Financeiro',
-  '/settings': 'Configurações',
+  '/settings': 'Configuracoes',
 }
+
+const SIDEBAR_WIDTH = 232
+const SIDEBAR_COLLAPSED_WIDTH = 62
 
 export default function Layout() {
   const { user, logout, setUser } = useAuth()
@@ -32,8 +39,19 @@ export default function Layout() {
   const [showNotifs, setShowNotifs] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const notifRef = useRef(null)
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('nexus_sidebar_collapsed') === '1' } catch { return false }
+  })
 
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(user?.role))
+
+  function toggleSidebar() {
+    setCollapsed(prev => {
+      const next = !prev
+      try { localStorage.setItem('nexus_sidebar_collapsed', next ? '1' : '0') } catch {}
+      return next
+    })
+  }
 
   useEffect(() => {
     if (user?.role === 'cliente') return
@@ -67,11 +85,14 @@ export default function Layout() {
     PAGE_TITLES[location.pathname] ||
     (location.pathname.startsWith('/clients/') ? 'Cliente' : '')
 
+  const sidebarW = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH
+
   return (
+    <SidebarContext.Provider value={{ collapsed }}>
     <div style={{ display: 'flex', minHeight: '100vh' }}>
       {/* Sidebar */}
       <aside style={{
-        width: 232,
+        width: sidebarW,
         flexShrink: 0,
         background: 'transparent',
         borderRight: `1px solid ${theme.colors.border}`,
@@ -80,67 +101,106 @@ export default function Layout() {
         height: '100vh',
         position: 'sticky',
         top: 0,
-        padding: '20px 14px',
+        padding: collapsed ? '20px 8px' : '20px 14px',
         zIndex: 100,
+        transition: 'width 0.2s ease, padding 0.2s ease',
+        overflow: 'hidden',
       }}>
         {/* Logo */}
-        <button onClick={() => navigate('/')} style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '4px 8px', marginBottom: 28, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
-        }}>
-          {user?.company_logo ? (
-            <img src={user.company_logo} alt="" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'cover' }} />
-          ) : (
-            <LogoMark size={32} />
-          )}
-          <div>
-            <div className="display" style={{ fontSize: 19, lineHeight: 1, letterSpacing: '-0.01em', color: theme.colors.text }}>
-              Nexus
-            </div>
-            <div className="eyebrow" style={{ marginTop: 3 }}>
-              {user?.company_name || 'Audiovisual'}
-            </div>
-          </div>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28, minHeight: 36 }}>
+          <button onClick={() => navigate('/')} style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            padding: '4px 8px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+            overflow: 'hidden', whiteSpace: 'nowrap',
+          }}>
+            {user?.company_logo ? (
+              <img src={user.company_logo} alt="" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+            ) : (
+              <LogoMark size={32} />
+            )}
+            {!collapsed && (
+              <div>
+                <div className="display" style={{ fontSize: 19, lineHeight: 1, letterSpacing: '-0.01em', color: theme.colors.text }}>
+                  Nexus
+                </div>
+                <div className="eyebrow" style={{ marginTop: 3 }}>
+                  {user?.company_name || 'Audiovisual'}
+                </div>
+              </div>
+            )}
+          </button>
+        </div>
 
         {/* Nav */}
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-          <div className="eyebrow" style={{ padding: '6px 12px 8px' }}>
-            {user?.role === 'cliente' ? 'Meu espaço' : user?.role === 'editor' ? 'Editor' : 'Operação'}
-          </div>
+          {!collapsed && (
+            <div className="eyebrow" style={{ padding: '6px 12px 8px' }}>
+              {user?.role === 'cliente' ? 'Meu espaco' : user?.role === 'editor' ? 'Editor' : 'Operacao'}
+            </div>
+          )}
           {NAV_ITEMS.slice(0, NAV_ITEMS.length > 4 ? 4 : NAV_ITEMS.length).map(item => (
-            <SidebarLink key={item.path} item={item} />
+            <SidebarLink key={item.path} item={item} collapsed={collapsed} />
           ))}
 
           {NAV_ITEMS.length > 4 && (
             <>
-              <div className="eyebrow" style={{ padding: '20px 12px 8px' }}>Conta</div>
+              {!collapsed && <div className="eyebrow" style={{ padding: '20px 12px 8px' }}>Conta</div>}
+              {collapsed && <div style={{ height: 16 }} />}
               {NAV_ITEMS.slice(4).map(item => (
-                <SidebarLink key={item.path} item={item} />
+                <SidebarLink key={item.path} item={item} collapsed={collapsed} />
               ))}
             </>
           )}
         </nav>
 
+        {/* Collapse toggle */}
+        <button
+          onClick={toggleSidebar}
+          title={collapsed ? 'Expandir menu' : 'Minimizar menu'}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 8, padding: '8px', marginBottom: 12,
+            background: theme.colors.surfaceHover, border: `1px solid ${theme.colors.border}`,
+            borderRadius: 8, cursor: 'pointer', color: theme.colors.textMuted,
+            fontSize: 12, transition: 'all 0.15s',
+          }}
+        >
+          <Icon name={collapsed ? 'arrowRight' : 'chevronLeft'} size={14} stroke />
+          {!collapsed && <span>Minimizar</span>}
+        </button>
+
         {/* User card */}
-        <div style={{ marginTop: 'auto' }}>
+        <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px' }}>
             <Avatar name={user?.name} size={32} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {user?.name}
+            {!collapsed && (
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user?.name}
+                </div>
+                <div className="eyebrow" style={{ marginTop: 1, textTransform: 'capitalize', letterSpacing: '0.08em' }}>
+                  {user?.role}
+                </div>
               </div>
-              <div className="eyebrow" style={{ marginTop: 1, textTransform: 'capitalize', letterSpacing: '0.08em' }}>
-                {user?.role}
-              </div>
-            </div>
+            )}
+            {!collapsed && (
+              <button onClick={logout} title="Sair" style={{
+                padding: 6, color: theme.colors.textMuted, borderRadius: 6,
+                display: 'flex', alignItems: 'center',
+              }}>
+                <Icon name="logout" size={16} stroke />
+              </button>
+            )}
+          </div>
+          {collapsed && (
             <button onClick={logout} title="Sair" style={{
               padding: 6, color: theme.colors.textMuted, borderRadius: 6,
-              display: 'flex', alignItems: 'center',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: '100%', marginTop: 4,
             }}>
               <Icon name="logout" size={16} stroke />
             </button>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -149,7 +209,7 @@ export default function Layout() {
         {/* Topbar */}
         <header style={{
           height: 64,
-          padding: '0 32px',
+          padding: '0 28px',
           borderBottom: `1px solid ${theme.colors.border}`,
           display: 'flex',
           alignItems: 'center',
@@ -183,8 +243,8 @@ export default function Layout() {
               }}
             >
               <Icon name="search" size={14} />
-              <span>Buscar…</span>
-              <span style={{ marginLeft: 'auto', fontFamily: theme.fonts.mono, fontSize: 10, padding: '2px 6px', background: theme.colors.surface, borderRadius: 4, color: theme.colors.textFaint }}>⌘K</span>
+              <span>Buscar...</span>
+              <span style={{ marginLeft: 'auto', fontFamily: theme.fonts.mono, fontSize: 10, padding: '2px 6px', background: theme.colors.surface, borderRadius: 4, color: theme.colors.textFaint }}>Ctrl+K</span>
             </button>
 
             {user?.role !== 'cliente' && (
@@ -230,11 +290,11 @@ export default function Layout() {
                     zIndex: 200,
                   }}>
                     <div style={{ padding: '14px 18px', borderBottom: `1px solid ${theme.colors.border}` }}>
-                      <div className="display" style={{ fontSize: 17, color: theme.colors.text }}>Notificações</div>
+                      <div className="display" style={{ fontSize: 17, color: theme.colors.text }}>Notificacoes</div>
                     </div>
                     {notifications.notifications.length === 0 ? (
                       <div style={{ padding: 32, textAlign: 'center', color: theme.colors.textMuted, fontSize: 13 }}>
-                        Nenhuma notificação
+                        Nenhuma notificacao
                       </div>
                     ) : notifications.notifications.slice(0, 12).map(n => (
                       <div key={n.id} style={{
@@ -259,10 +319,8 @@ export default function Layout() {
                                   e.stopPropagation()
                                   try {
                                     await api.team.acceptInvite(n.reference_id)
-                                    // Refresh notifications
                                     const d = await api.notifications.get()
                                     setNotifications(d)
-                                    // Refresh user data
                                     const me = await api.auth.me()
                                     if (setUser) setUser(me)
                                   } catch (err) { alert(err.message) }
@@ -308,7 +366,7 @@ export default function Layout() {
         </header>
 
         {/* Page content */}
-        <main style={{ flex: 1, padding: '28px 40px 48px', overflowY: 'auto' }}>
+        <main style={{ flex: 1, padding: '24px 28px 48px', overflowY: 'auto' }}>
           <Outlet />
         </main>
       </div>
@@ -319,7 +377,7 @@ export default function Layout() {
           <div className="modal" style={{ width: 580 }} onClick={e => e.stopPropagation()}>
             <div style={{ padding: '18px 20px', borderBottom: `1px solid ${theme.colors.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
               <Icon name="search" size={16} color={theme.colors.textFaint} />
-              <input autoFocus placeholder="Buscar pedidos, clientes, editores…" style={{
+              <input autoFocus placeholder="Buscar pedidos, clientes, editores..." style={{
                 flex: 1, background: 'transparent', border: 'none', outline: 'none',
                 fontSize: 15, color: theme.colors.text,
               }} />
@@ -341,17 +399,20 @@ export default function Layout() {
         </div>
       )}
     </div>
+    </SidebarContext.Provider>
   )
 }
 
-function SidebarLink({ item }) {
+function SidebarLink({ item, collapsed }) {
   return (
     <NavLink
       to={item.path}
       end={item.end}
+      title={collapsed ? item.label : undefined}
       style={({ isActive }) => ({
         display: 'flex', alignItems: 'center', gap: 12,
-        padding: '8px 12px',
+        padding: collapsed ? '8px' : '8px 12px',
+        justifyContent: collapsed ? 'center' : 'flex-start',
         borderRadius: 8,
         color: isActive ? theme.colors.text : theme.colors.textMuted,
         background: isActive ? theme.colors.surfaceHover : 'transparent',
@@ -364,14 +425,14 @@ function SidebarLink({ item }) {
     >
       {({ isActive }) => (
         <>
-          {isActive && (
+          {isActive && !collapsed && (
             <span style={{
-              position: 'absolute', left: -14, top: '50%', transform: 'translateY(-50%)',
+              position: 'absolute', left: collapsed ? -8 : -14, top: '50%', transform: 'translateY(-50%)',
               width: 2, height: 18, background: theme.colors.primary, borderRadius: 2,
             }} />
           )}
           <Icon name={item.icon} size={16} stroke color={isActive ? theme.colors.primary : 'currentColor'} />
-          <span>{item.label}</span>
+          {!collapsed && <span>{item.label}</span>}
         </>
       )}
     </NavLink>

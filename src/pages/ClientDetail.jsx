@@ -142,13 +142,21 @@ export default function ClientDetail() {
   }
 
   function getOrdersByColumn(colId) {
-    return orders.filter(o => o.column_id === colId)
+    return orders
+      .filter(o => o.column_id === colId)
+      .sort((a, b) => {
+        // Orders with due dates first, sorted ascending; then without
+        if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date)
+        if (a.due_date && !b.due_date) return -1
+        if (!a.due_date && b.due_date) return 1
+        return 0
+      })
   }
 
   if (!client) return <Spinner />
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px - 28px - 48px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px - 24px - 48px)' }}>
       {/* Client header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 16, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
@@ -232,7 +240,7 @@ export default function ClientDetail() {
       </div>
 
       {/* Columns */}
-      <div style={{ display: 'flex', gap: 14, flex: 1, overflowX: 'auto', paddingBottom: 8, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 10, flex: 1, overflowX: 'auto', paddingBottom: 8, minHeight: 0 }}>
         {columns.map(column => {
           const colOrders = getOrdersByColumn(column.id)
           const isOver = dragOverCol === column.id
@@ -242,12 +250,11 @@ export default function ClientDetail() {
               onDragLeave={() => setDragOverCol(null)}
               onDrop={e => handleDrop(e, column.id)}
               style={{
-                minWidth: 296, width: 296, flexShrink: 0,
+                minWidth: 240, width: 240, flexShrink: 0, flex: '1 0 240px',
                 background: isOver ? theme.colors.surfaceHover : theme.colors.bgSecondary,
                 border: `1px solid ${isOver ? column.color + '80' : theme.colors.border}`,
                 borderRadius: 12,
                 display: 'flex', flexDirection: 'column',
-                maxHeight: '100%',
                 transition: 'border-color 0.12s, background 0.12s',
               }}>
               <div style={{
