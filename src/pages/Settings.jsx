@@ -5,33 +5,37 @@ import api from '../api'
 import theme from '../styles/theme'
 import resizeImage from '../utils/resizeImage'
 import {
-  Icon, LogoMark, Spinner, Field,
+  Icon, Avatar, LogoMark, Spinner, Field,
   inputStyle, btnPrimary, btnSoft, panelStyle,
 } from '../components/ui'
 
-const tabs = [
-  { id: 'workspace', label: 'Workspace' },
-  { id: 'columns', label: 'Etapas do kanban' },
-  { id: 'account', label: 'Sua conta' },
+const ALL_TABS = [
+  { id: 'workspace', label: 'Workspace', roles: ['gestor'] },
+  { id: 'columns', label: 'Etapas do kanban', roles: ['gestor'] },
+  { id: 'account', label: 'Sua conta', roles: ['gestor', 'editor', 'cliente'] },
 ]
 
 export default function Settings() {
-  const [tab, setTab] = useState('workspace')
+  const { user } = useAuth()
+  const visibleTabs = ALL_TABS.filter(t => t.roles.includes(user?.role))
+  const [tab, setTab] = useState(visibleTabs[0]?.id || 'account')
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 32, maxWidth: 1100 }}>
-      <aside>
-        <div className="eyebrow" style={{ marginBottom: 12, padding: '0 8px' }}>configuracoes</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
-              padding: '8px 12px', borderRadius: 6, textAlign: 'left', fontSize: 13,
-              color: tab === t.id ? theme.colors.text : theme.colors.textMuted,
-              background: tab === t.id ? theme.colors.surfaceHover : 'transparent',
-            }}>{t.label}</button>
-          ))}
-        </div>
-      </aside>
+    <div style={{ display: 'grid', gridTemplateColumns: visibleTabs.length > 1 ? '220px 1fr' : '1fr', gap: 32, maxWidth: 1100 }}>
+      {visibleTabs.length > 1 && (
+        <aside>
+          <div className="eyebrow" style={{ marginBottom: 12, padding: '0 8px' }}>configuracoes</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {visibleTabs.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{
+                padding: '8px 12px', borderRadius: 6, textAlign: 'left', fontSize: 13,
+                color: tab === t.id ? theme.colors.text : theme.colors.textMuted,
+                background: tab === t.id ? theme.colors.surfaceHover : 'transparent',
+              }}>{t.label}</button>
+            ))}
+          </div>
+        </aside>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
         {tab === 'workspace' && <WorkspaceSettings />}
@@ -210,7 +214,42 @@ function ColumnsSettings() {
 }
 
 function AccountSettings() {
-  const { user, logout } = useAuth()
+  const { user, logout, setUser } = useAuth()
+  const [name, setName] = useState(user?.name || '')
+  const [saving, setSaving] = useState(false)
+  const avatarRef = useRef(null)
+
+  async function handleAvatarUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      setSaving(true)
+      const dataUrl = await resizeImage(file, 256, 0.85)
+      await api.auth.updateProfile({ avatar: dataUrl })
+      const me = await api.auth.me()
+      if (setUser) setUser(me)
+    } catch (err) { alert(err.message) } finally { setSaving(false) }
+  }
+
+  async function handleRemoveAvatar() {
+    try {
+      setSaving(true)
+      await api.auth.updateProfile({ avatar: '' })
+      const me = await api.auth.me()
+      if (setUser) setUser(me)
+    } catch (err) { alert(err.message) } finally { setSaving(false) }
+  }
+
+  async function handleSaveName() {
+    if (!name.trim() || name === user?.name) return
+    try {
+      setSaving(true)
+      await api.auth.updateProfile({ name: name.trim() })
+      const me = await api.auth.me()
+      if (setUser) setUser(me)
+    } catch (err) { alert(err.message) } finally { setSaving(false) }
+  }
+
   return (
     <>
       <div>
@@ -221,8 +260,49 @@ function AccountSettings() {
       </div>
 
       <Section title="Perfil">
+        <Row label="Foto de perfil" hint="PNG ou JPG, quadrado.">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%',
+              background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflow: 'hidden', flexShrink: 0,
+            }}>
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <Avatar name={user?.name} size={56} />
+              )}
+            </div>
+            <input
+              ref={avatarRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleAvatarUpload}
+              style={{ display: 'none' }}
+            />
+            <button onClick={() => avatarRef.current?.click()} style={btnSoft} disabled={saving}>
+              {saving ? 'Enviando...' : 'Trocar foto'}
+            </button>
+            {user?.avatar && (
+              <button onClick={handleRemoveAvatar} disabled={saving}
+                style={{ ...btnSoft, color: theme.colors.danger, borderColor: 'rgba(244,115,131,0.3)' }}>
+                Remover
+              </button>
+            )}
+          </div>
+        </Row>
         <Row label="Nome">
-          <input className="nx-input" defaultValue={user?.name} style={inputStyle} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button onClick={handleSaveName} style={btnSoft} disabled={saving || name === user?.name}>
+              Salvar
+            </button>
+          </div>
         </Row>
         <Row label="Email">
           <input className="nx-input" defaultValue={user?.email} readOnly style={{ ...inputStyle, opacity: 0.7 }} />

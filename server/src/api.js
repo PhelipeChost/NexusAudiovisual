@@ -113,6 +113,25 @@ router.get('/auth/me', authMiddleware, (req, res) => {
   res.json(user)
 })
 
+// Update user avatar and/or name
+router.put('/auth/profile', authMiddleware, (req, res) => {
+  const { avatar, name } = req.body
+
+  if (avatar !== undefined) {
+    // empty string = remove avatar
+    run('UPDATE users SET avatar = ? WHERE id = ?', [avatar || null, req.user.id])
+  }
+  if (name && name.trim()) {
+    run('UPDATE users SET name = ? WHERE id = ?', [name.trim(), req.user.id])
+  }
+
+  const user = get(
+    'SELECT u.id, u.name, u.email, u.role, u.company_id, u.avatar, u.phone, c.name as company_name, c.logo as company_logo, c.primary_color FROM users u JOIN companies c ON c.id = u.company_id WHERE u.id = ?',
+    [req.user.id]
+  )
+  res.json(user)
+})
+
 // ============ INVITES ============
 
 router.post('/clients/:id/invite', authMiddleware, requireRole('gestor'), (req, res) => {

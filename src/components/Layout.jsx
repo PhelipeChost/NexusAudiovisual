@@ -16,7 +16,7 @@ const ALL_NAV_ITEMS = [
   { path: '/clients', label: 'Clientes', icon: 'clients', roles: ['gestor'] },
   { path: '/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
   { path: '/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
-  { path: '/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor'] },
+  { path: '/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente'] },
 ]
 
 const PAGE_TITLES = {
@@ -172,7 +172,7 @@ export default function Layout() {
         {/* User card */}
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px' }}>
-            <Avatar name={user?.name} size={32} />
+            <Avatar name={user?.name} size={32} src={user?.avatar || undefined} />
             {!collapsed && (
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

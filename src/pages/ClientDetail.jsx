@@ -31,6 +31,8 @@ export default function ClientDetail() {
   const [dragOverCol, setDragOverCol] = useState(null)
   const dragItem = useRef(null)
   const [inviteLink, setInviteLink] = useState(null)
+  const [showDeleteClient, setShowDeleteClient] = useState(false)
+  const [deletingClient, setDeletingClient] = useState(false)
   const logoInputRef = useRef(null)
   const [form, setForm] = useState({
     title: '', description: '', briefing: '', drive_links: '',
@@ -62,6 +64,17 @@ export default function ClientDetail() {
       setForm({ title: '', description: '', briefing: '', drive_links: '', priority: 'normal', due_date: '', editor_id: '', value: '', editor_value: '' })
       loadData()
     } catch (err) { alert(err.message) }
+  }
+
+  async function handleDeleteClient() {
+    setDeletingClient(true)
+    try {
+      await api.clients.delete(id)
+      navigate('/clients')
+    } catch (err) {
+      alert(err.message)
+      setDeletingClient(false)
+    }
   }
 
   async function handleDeleteOrder() {
@@ -218,6 +231,13 @@ export default function ClientDetail() {
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button
+            onClick={() => setShowDeleteClient(true)}
+            title="Excluir cliente"
+            style={{ ...btnSoft, color: theme.colors.danger, borderColor: 'rgba(244,115,131,0.3)', padding: '7px 10px' }}
+          >
+            <Icon name="trash" size={13} />
+          </button>
+          <button
             onClick={async () => {
               try {
                 const data = await api.clients.invite(id)
@@ -359,6 +379,41 @@ export default function ClientDetail() {
             <button type="submit" style={btnPrimary}>Criar pedido</button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete client confirmation */}
+      <Modal open={showDeleteClient} onClose={() => setShowDeleteClient(false)} title="Excluir cliente" width={460}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '8px 0' }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: theme.colors.dangerMuted,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name="trash" size={24} color={theme.colors.danger} />
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: theme.colors.text, marginBottom: 6 }}>
+              Excluir {client?.name}?
+            </div>
+            <div style={{ fontSize: 13, color: theme.colors.textMuted, lineHeight: 1.5 }}>
+              O cliente sera desativado e nao aparecera mais na lista.
+              Os pedidos e dados serao mantidos no sistema.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={() => setShowDeleteClient(false)} style={{ ...btnSoft, padding: '10px 22px' }} disabled={deletingClient}>
+              Cancelar
+            </button>
+            <button onClick={handleDeleteClient} disabled={deletingClient} style={{
+              ...btnPrimary, padding: '10px 22px',
+              background: theme.colors.danger, color: '#fff',
+              opacity: deletingClient ? 0.6 : 1,
+            }}>
+              <Icon name="trash" size={13} />
+              {deletingClient ? 'Excluindo...' : 'Sim, excluir'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       {/* Detail Modal */}
