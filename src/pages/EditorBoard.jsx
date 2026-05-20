@@ -96,10 +96,15 @@ export default function EditorBoard() {
     if (!order || order.column_id === columnId) return
     if (isLocked(colName)) return
 
-    // Optimistic update
-    const prev = [...orders]
-    const idx = orders.findIndex(o => o.id === order.id)
-    if (idx >= 0) orders[idx] = { ...orders[idx], column_id: columnId }
+    // Optimistic update via setData so React re-renders immediately
+    setData(prev => {
+      if (!prev) return prev
+      const updated = { ...prev, clients: prev.clients.map(c => {
+        if (c.id !== selectedClient && c.id !== clients[0]?.id) return c
+        return { ...c, orders: c.orders.map(o => o.id === order.id ? { ...o, column_id: columnId } : o) }
+      })}
+      return updated
+    })
 
     try {
       await api.orders.update(order.id, { column_id: columnId })
