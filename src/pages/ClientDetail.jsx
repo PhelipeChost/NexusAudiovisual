@@ -1,6 +1,7 @@
 // src/pages/ClientDetail.jsx — kanban + order detail modal
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import theme from '../styles/theme'
 import resizeImage from '../utils/resizeImage'
@@ -14,6 +15,7 @@ import {
 export default function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [client, setClient] = useState(null)
   const [columns, setColumns] = useState([])
   const [orders, setOrders] = useState([])
@@ -211,7 +213,8 @@ export default function ClientDetail() {
             onClick={async () => {
               try {
                 const data = await api.clients.invite(id)
-                const url = window.location.origin + data.url
+                const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+                const url = window.location.origin + base + data.url
                 setInviteLink(url)
                 navigator.clipboard.writeText(url).catch(() => {})
               } catch (err) { alert(err.message) }
@@ -360,6 +363,7 @@ export default function ClientDetail() {
             checklist={checklist}
             editors={editors}
             columns={columns}
+            userRole={user?.role}
             newComment={newComment} setNewComment={setNewComment}
             newCheckItem={newCheckItem} setNewCheckItem={setNewCheckItem}
             addComment={addComment} addCheckItem={addCheckItem} toggleCheck={toggleCheck}
@@ -466,12 +470,13 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
 }
 
 function OrderDetail({
-  order, comments, checklist, editors, columns,
+  order, comments, checklist, editors, columns, userRole,
   newComment, setNewComment, newCheckItem, setNewCheckItem,
   addComment, addCheckItem, toggleCheck,
   showDeleteConfirm, setShowDeleteConfirm, handleDelete,
   onUpdate, onClose,
 }) {
+  const isGestor = userRole === 'gestor'
   const d = daysUntil(order.due_date)
   const overdue = d != null && d < 0
   const column = columns.find(c => c.id === order.column_id)
@@ -607,29 +612,71 @@ function OrderDetail({
       <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 28 }}>
         {/* Left col */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-          {order.description && (
+          {(isGestor || order.description) && (
             <div>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Descrição</div>
-              <div style={{
-                padding: 14, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
-                borderRadius: 8, fontSize: 13.5, color: theme.colors.textSecondary,
-                lineHeight: 1.6, whiteSpace: 'pre-wrap',
-              }}>
-                {order.description}
-              </div>
+              {isGestor ? (
+                <textarea
+                  defaultValue={order.description || ''}
+                  onBlur={e => {
+                    const v = e.target.value
+                    if (v !== (order.description || '')) onUpdate('description', v)
+                  }}
+                  placeholder="Adicione uma descrição…"
+                  rows={3}
+                  style={{
+                    width: '100%', padding: 14, background: theme.colors.bg,
+                    border: `1px solid ${theme.colors.border}`, borderRadius: 8,
+                    fontSize: 13.5, color: theme.colors.textSecondary, lineHeight: 1.6,
+                    resize: 'vertical', fontFamily: theme.fonts.ui, outline: 'none',
+                    transition: 'border-color 0.15s',
+                  }}
+                  onFocus={e => e.target.style.borderColor = theme.colors.primary}
+                  onMouseLeave={e => { if (document.activeElement !== e.target) e.target.style.borderColor = theme.colors.border }}
+                />
+              ) : (
+                <div style={{
+                  padding: 14, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+                  borderRadius: 8, fontSize: 13.5, color: theme.colors.textSecondary,
+                  lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                }}>
+                  {order.description}
+                </div>
+              )}
             </div>
           )}
 
-          {order.briefing && (
+          {(isGestor || order.briefing) && (
             <div>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Briefing</div>
-              <div style={{
-                padding: 14, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
-                borderRadius: 8, fontSize: 13.5, color: theme.colors.textSecondary,
-                lineHeight: 1.6, whiteSpace: 'pre-wrap',
-              }}>
-                {order.briefing}
-              </div>
+              {isGestor ? (
+                <textarea
+                  defaultValue={order.briefing || ''}
+                  onBlur={e => {
+                    const v = e.target.value
+                    if (v !== (order.briefing || '')) onUpdate('briefing', v)
+                  }}
+                  placeholder="Adicione o briefing…"
+                  rows={3}
+                  style={{
+                    width: '100%', padding: 14, background: theme.colors.bg,
+                    border: `1px solid ${theme.colors.border}`, borderRadius: 8,
+                    fontSize: 13.5, color: theme.colors.textSecondary, lineHeight: 1.6,
+                    resize: 'vertical', fontFamily: theme.fonts.ui, outline: 'none',
+                    transition: 'border-color 0.15s',
+                  }}
+                  onFocus={e => e.target.style.borderColor = theme.colors.primary}
+                  onMouseLeave={e => { if (document.activeElement !== e.target) e.target.style.borderColor = theme.colors.border }}
+                />
+              ) : (
+                <div style={{
+                  padding: 14, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+                  borderRadius: 8, fontSize: 13.5, color: theme.colors.textSecondary,
+                  lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                }}>
+                  {order.briefing}
+                </div>
+              )}
             </div>
           )}
 
