@@ -136,7 +136,7 @@ export default function ClientDashboard() {
                 const colOrders = sortByDueDate(orders.filter(o => o.column_id === column.id))
                 return (
                   <div key={column.id} style={{
-                    minWidth: 240, width: 240, flexShrink: 0, flex: '1 0 240px',
+                    minWidth: 0, width: 0, flexShrink: 0, flex: '1 1 0',
                     background: theme.colors.bgSecondary,
                     border: `1px solid ${theme.colors.border}`,
                     borderRadius: 12,
@@ -163,7 +163,7 @@ export default function ClientDashboard() {
                       </span>
                     </div>
 
-                    <div style={{ flex: 1, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {colOrders.map(order => (
                         <ClientOrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} />
                       ))}

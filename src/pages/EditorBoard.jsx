@@ -144,7 +144,7 @@ export default function EditorBoard() {
       )}
 
       {/* Kanban columns */}
-      <div style={{ display: 'flex', gap: 10, flex: 1, overflowX: 'auto', paddingBottom: 8, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 10, flex: 1, overflowX: 'auto', paddingBottom: 8 }}>
         {columns.map(column => {
           const colOrders = getOrdersByColumn(column.id)
           const isOver = dragOverCol === column.id
@@ -156,7 +156,7 @@ export default function EditorBoard() {
               onDragLeave={() => setDragOverCol(null)}
               onDrop={e => handleDrop(e, column.id, column.name)}
               style={{
-                minWidth: 240, width: 240, flexShrink: 0, flex: '1 0 240px',
+                minWidth: 0, width: 0, flexShrink: 0, flex: '1 1 0',
                 background: isOver ? theme.colors.surfaceHover : theme.colors.bgSecondary,
                 border: `1px solid ${isOver ? column.color + '80' : theme.colors.border}`,
                 borderRadius: 12,
@@ -191,7 +191,7 @@ export default function EditorBoard() {
                 </span>
               </div>
 
-              <div style={{ flex: 1, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {colOrders.map(order => (
                   <EditorOrderCard
                     key={order.id}
