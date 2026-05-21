@@ -643,7 +643,7 @@ function PlatformSettingsPanel() {
           fontFamily: 'monospace', fontSize: 12, color: theme.colors.primary,
           wordBreak: 'break-all',
         }}>
-          {appUrl || 'https://reinonexusideal.com.br'}/audiovisual/api/payment/webhook
+          {(appUrl || 'https://reinonexusideal.com.br').replace(/\/audiovisual\/?$/, '')}/audiovisual/api/payment/webhook
         </div>
         <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 8 }}>
           No Mercado Pago: Suas integracoes → Notificacoes IPN → URL de notificacao
