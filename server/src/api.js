@@ -2016,43 +2016,43 @@ router.post('/admin/plans', authMiddleware, requireRole('admin'), (req, res) => 
 })
 
 router.put('/admin/plans/:id', authMiddleware, requireRole('admin'), (req, res) => {
-  const { name, price, description, type, benefits, active, visible, featured, discount_3m, discount_6m, discount_12m, position } = req.body
+  const body = req.body
+  const sets = []
+  const params = []
 
-  run(
-    `UPDATE plans SET
-      name = COALESCE(?, name),
-      price = COALESCE(?, price),
-      description = COALESCE(?, description),
-      type = COALESCE(?, type),
-      benefits = COALESCE(?, benefits),
-      active = COALESCE(?, active),
-      visible = COALESCE(?, visible),
-      featured = COALESCE(?, featured),
-      discount_3m = COALESCE(?, discount_3m),
-      discount_6m = COALESCE(?, discount_6m),
-      discount_12m = COALESCE(?, discount_12m),
-      position = COALESCE(?, position)
-    WHERE id = ?`,
-    [
-      name, price, description, type,
-      benefits !== undefined ? JSON.stringify(benefits) : null,
-      active !== undefined ? (active ? 1 : 0) : null,
-      visible !== undefined ? (visible ? 1 : 0) : null,
-      featured !== undefined ? (featured ? 1 : 0) : null,
-      discount_3m !== undefined ? discount_3m : null,
-      discount_6m !== undefined ? discount_6m : null,
-      discount_12m !== undefined ? discount_12m : null,
-      position !== undefined ? position : null,
-      req.params.id,
-    ]
-  )
-
-  // If this plan is set as featured, un-feature all others
-  if (featured) {
-    run('UPDATE plans SET featured = 0 WHERE id != ?', [req.params.id])
+  const fields = {
+    name: body.name,
+    price: body.price,
+    description: body.description,
+    type: body.type,
+    benefits: body.benefits !== undefined ? JSON.stringify(body.benefits) : undefined,
+    active: body.active !== undefined ? (body.active ? 1 : 0) : undefined,
+    visible: body.visible !== undefined ? (body.visible ? 1 : 0) : undefined,
+    featured: body.featured !== undefined ? (body.featured ? 1 : 0) : undefined,
+    discount_3m: body.discount_3m,
+    discount_6m: body.discount_6m,
+    discount_12m: body.discount_12m,
+    position: body.position,
   }
 
-  const plan = get('SELECT * FROM plans WHERE id = ?', [req.params.id])
+  for (const [col, val] of Object.entries(fields)) {
+    if (val !== undefined && val !== null) {
+      sets.push(`${col} = ?`)
+      params.push(val)
+    }
+  }
+
+  if (sets.length > 0) {
+    params.push(parseInt(req.params.id))
+    run(`UPDATE plans SET ${sets.join(', ')} WHERE id = ?`, params)
+  }
+
+  // If this plan is set as featured, un-feature all others
+  if (body.featured) {
+    run('UPDATE plans SET featured = 0 WHERE id != ?', [parseInt(req.params.id)])
+  }
+
+  const plan = get('SELECT * FROM plans WHERE id = ?', [parseInt(req.params.id)])
   try { plan.benefits = JSON.parse(plan.benefits || '[]') } catch { plan.benefits = [] }
   res.json(plan)
 })
