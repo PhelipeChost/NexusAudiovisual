@@ -619,14 +619,23 @@ router.post('/clients/:clientId/columns', authMiddleware, requireRole('gestor'),
 // ============ ORDERS ============
 
 router.get('/clients/:clientId/orders', authMiddleware, (req, res) => {
+  const { month } = req.query // format: YYYY-MM
+  let where = 'o.company_id = ? AND o.client_id = ?'
+  const params = [req.user.company_id, req.params.clientId]
+
+  if (month) {
+    where += " AND strftime('%Y-%m', o.created_at) = ?"
+    params.push(month)
+  }
+
   const orders = all(
     `SELECT o.*, u.name as editor_name, kc.name as column_name, kc.color as column_color
      FROM orders o
      LEFT JOIN users u ON u.id = o.editor_id
      LEFT JOIN kanban_columns kc ON kc.id = o.column_id
-     WHERE o.company_id = ? AND o.client_id = ?
+     WHERE ${where}
      ORDER BY o.position`,
-    [req.user.company_id, req.params.clientId]
+    params
   )
   res.json(orders)
 })

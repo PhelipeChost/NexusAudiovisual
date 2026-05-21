@@ -37,12 +37,16 @@ export default function ClientDetail() {
   const [templates, setTemplates] = useState([])
   const [showSaveTemplate, setShowSaveTemplate] = useState(false)
   const [templateName, setTemplateName] = useState('')
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
   const [form, setForm] = useState({
     title: '', description: '', briefing: '', drive_links: '',
     priority: 'normal', due_date: '', editor_id: '', value: '', editor_value: '',
   })
 
-  useEffect(() => { loadData(); loadTemplates() }, [id])
+  useEffect(() => { loadData(); loadTemplates() }, [id, selectedMonth])
 
   async function loadTemplates() {
     try {
@@ -56,7 +60,7 @@ export default function ClientDetail() {
       const [clientData, columnsData, ordersData, teamData] = await Promise.all([
         api.clients.get(id),
         api.clients.getColumns(id),
-        api.orders.listByClient(id),
+        api.orders.listByClient(id, selectedMonth),
         api.team.list(),
       ])
       setClient(clientData)
@@ -286,6 +290,39 @@ export default function ClientDetail() {
             Novo pedido
           </button>
         </div>
+      </div>
+
+      {/* Month selector */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexShrink: 0 }}>
+        <button onClick={() => {
+          const [y, m] = selectedMonth.split('-').map(Number)
+          const d = new Date(y, m - 2, 1)
+          setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+        }} style={{
+          padding: '5px 8px', borderRadius: 6, background: theme.colors.bgSecondary,
+          border: `1px solid ${theme.colors.border}`, color: theme.colors.textMuted, cursor: 'pointer',
+        }}>
+          <Icon name="chevronLeft" size={12} />
+        </button>
+        <span style={{
+          fontSize: 13, fontWeight: 500, color: theme.colors.text, minWidth: 120, textAlign: 'center',
+          textTransform: 'capitalize',
+        }}>
+          {new Date(selectedMonth + '-15').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+        </span>
+        <button onClick={() => {
+          const [y, m] = selectedMonth.split('-').map(Number)
+          const d = new Date(y, m, 1)
+          setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+        }} style={{
+          padding: '5px 8px', borderRadius: 6, background: theme.colors.bgSecondary,
+          border: `1px solid ${theme.colors.border}`, color: theme.colors.textMuted, cursor: 'pointer',
+        }}>
+          <Icon name="chevronRight" size={12} />
+        </button>
+        <span className="mono" style={{ fontSize: 11, color: theme.colors.textFaint, marginLeft: 8 }}>
+          {orders.length} pedido{orders.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
       {/* Columns */}
@@ -542,16 +579,40 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
   const overdue = d != null && d < 0
   const today = d === 0
   const [showPreview, setShowPreview] = useState(false)
+  const [previewPos, setPreviewPos] = useState({ horizontal: 'right', vertical: 'top' })
   const hoverTimer = useRef(null)
   const cardRef = useRef(null)
 
   function onEnter() {
-    hoverTimer.current = setTimeout(() => setShowPreview(true), 400)
+    hoverTimer.current = setTimeout(() => {
+      if (cardRef.current) {
+        const rect = cardRef.current.getBoundingClientRect()
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        const horizontal = rect.right + 316 > vw ? 'left' : 'right'
+        const vertical = rect.top + 300 > vh ? 'bottom' : 'top'
+        setPreviewPos({ horizontal, vertical })
+      }
+      setShowPreview(true)
+    }, 400)
   }
   function onLeave(e) {
     clearTimeout(hoverTimer.current)
     setShowPreview(false)
     e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.35)' : theme.colors.border
+  }
+
+  const previewStyle = {
+    position: 'absolute', width: 300, padding: 14, zIndex: 999,
+    background: theme.colors.panel, border: `1px solid ${theme.colors.borderLight}`,
+    borderRadius: 10, boxShadow: theme.shadows.lg,
+    pointerEvents: 'none',
+    ...(previewPos.horizontal === 'right'
+      ? { left: '100%', marginLeft: 8 }
+      : { right: '100%', marginRight: 8 }),
+    ...(previewPos.vertical === 'top'
+      ? { top: 0 }
+      : { bottom: 0 }),
   }
 
   return (
@@ -632,15 +693,9 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
         )}
       </div>
 
-      {/* Hover preview tooltip */}
+      {/* Hover preview tooltip — posição adaptativa */}
       {showPreview && (
-        <div style={{
-          position: 'absolute', left: '100%', top: 0, marginLeft: 8,
-          width: 300, padding: 14, zIndex: 999,
-          background: theme.colors.panel, border: `1px solid ${theme.colors.borderLight}`,
-          borderRadius: 10, boxShadow: theme.shadows.lg,
-          pointerEvents: 'none',
-        }}>
+        <div style={previewStyle}>
           <div style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text, marginBottom: 10 }}>{order.title}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
             <div style={{ display: 'flex', gap: 8 }}>

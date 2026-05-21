@@ -81,7 +81,7 @@ const api = {
   },
 
   orders: {
-    listByClient: (clientId) => request(`/clients/${clientId}/orders`),
+    listByClient: (clientId, month) => request(`/clients/${clientId}/orders${month ? `?month=${month}` : ''}`),
     listAll: () => request('/orders'),
     create: (clientId, data) => request(`/clients/${clientId}/orders`, { method: 'POST', body: JSON.stringify(data) }),
     update: (id, data) => request(`/orders/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
