@@ -16,6 +16,8 @@ const ALL_NAV_ITEMS = [
   { path: '/clients', label: 'Clientes', icon: 'clients', roles: ['gestor'] },
   { path: '/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
   { path: '/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
+  { path: '/calendar', label: 'Calendario', icon: 'calendar', roles: ['gestor'] },
+  { path: '/reports', label: 'Relatorios', icon: 'briefcase', roles: ['gestor'] },
   { path: '/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente'] },
 ]
 
@@ -25,6 +27,8 @@ const PAGE_TITLES = {
   '/clients': 'Clientes',
   '/team': 'Equipe',
   '/financial': 'Financeiro',
+  '/calendar': 'Calendario',
+  '/reports': 'Relatorios',
   '/settings': 'Configuracoes',
 }
 
@@ -54,7 +58,6 @@ export default function Layout() {
   }
 
   useEffect(() => {
-    if (user?.role === 'cliente') return
     let cancelled = false
     const load = () => api.notifications.get().then(d => { if (!cancelled) setNotifications(d) }).catch(() => {})
     load()
@@ -138,15 +141,15 @@ export default function Layout() {
               {user?.role === 'cliente' ? 'Meu espaco' : user?.role === 'editor' ? 'Editor' : 'Operacao'}
             </div>
           )}
-          {NAV_ITEMS.slice(0, NAV_ITEMS.length > 4 ? 4 : NAV_ITEMS.length).map(item => (
+          {NAV_ITEMS.slice(0, NAV_ITEMS.length > 6 ? 6 : NAV_ITEMS.length).map(item => (
             <SidebarLink key={item.path} item={item} collapsed={collapsed} />
           ))}
 
-          {NAV_ITEMS.length > 4 && (
+          {NAV_ITEMS.length > 6 && (
             <>
               {!collapsed && <div className="eyebrow" style={{ padding: '20px 12px 8px' }}>Conta</div>}
               {collapsed && <div style={{ height: 16 }} />}
-              {NAV_ITEMS.slice(4).map(item => (
+              {NAV_ITEMS.slice(6).map(item => (
                 <SidebarLink key={item.path} item={item} collapsed={collapsed} />
               ))}
             </>
@@ -247,8 +250,7 @@ export default function Layout() {
               <span style={{ marginLeft: 'auto', fontFamily: theme.fonts.mono, fontSize: 10, padding: '2px 6px', background: theme.colors.surface, borderRadius: 4, color: theme.colors.textFaint }}>Ctrl+K</span>
             </button>
 
-            {user?.role !== 'cliente' && (
-              <div ref={notifRef} style={{ position: 'relative' }}>
+            <div ref={notifRef} style={{ position: 'relative' }}>
                 <button
                   onClick={() => {
                     setShowNotifs(o => !o)
@@ -361,7 +363,6 @@ export default function Layout() {
                   </div>
                 )}
               </div>
-            )}
           </div>
         </header>
 

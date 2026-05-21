@@ -34,12 +34,22 @@ export default function ClientDetail() {
   const [showDeleteClient, setShowDeleteClient] = useState(false)
   const [deletingClient, setDeletingClient] = useState(false)
   const logoInputRef = useRef(null)
+  const [templates, setTemplates] = useState([])
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false)
+  const [templateName, setTemplateName] = useState('')
   const [form, setForm] = useState({
     title: '', description: '', briefing: '', drive_links: '',
     priority: 'normal', due_date: '', editor_id: '', value: '', editor_value: '',
   })
 
-  useEffect(() => { loadData() }, [id])
+  useEffect(() => { loadData(); loadTemplates() }, [id])
+
+  async function loadTemplates() {
+    try {
+      const t = await api.templates.list()
+      setTemplates(t)
+    } catch {}
+  }
 
   async function loadData() {
     try {
@@ -75,6 +85,25 @@ export default function ClientDetail() {
       alert(err.message)
       setDeletingClient(false)
     }
+  }
+
+  async function handleDuplicateOrder() {
+    if (!selectedOrder) return
+    try {
+      await api.orders.create(id, {
+        title: selectedOrder.title + ' (cópia)',
+        description: selectedOrder.description || '',
+        briefing: selectedOrder.briefing || '',
+        drive_links: selectedOrder.drive_links || '',
+        priority: selectedOrder.priority || 'normal',
+        due_date: '',
+        editor_id: selectedOrder.editor_id || null,
+        value: selectedOrder.value || '',
+        editor_value: selectedOrder.editor_value || '',
+      })
+      setShowDetailModal(false)
+      loadData()
+    } catch (err) { alert(err.message) }
   }
 
   async function handleDeleteOrder() {
@@ -324,8 +353,31 @@ export default function ClientDetail() {
       </div>
 
       {/* Create Modal */}
-      <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Novo pedido" subtitle={client.name} width={620}>
+      <Modal open={showCreateModal} onClose={() => { setShowCreateModal(false); setShowSaveTemplate(false) }} title="Novo pedido" subtitle={client.name} width={620}>
         <form onSubmit={handleCreateOrder} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Template selector */}
+          {templates.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: theme.colors.textMuted }}>Templates:</span>
+              {templates.map(t => (
+                <button key={t.id} type="button" onClick={() => setForm({
+                  ...form,
+                  description: t.description || '',
+                  briefing: t.briefing || '',
+                  priority: t.priority || 'normal',
+                  drive_links: t.drive_links || '',
+                })} style={{
+                  padding: '4px 10px', borderRadius: 6, fontSize: 11,
+                  background: theme.colors.bgSecondary, border: `1px solid ${theme.colors.border}`,
+                  color: theme.colors.primary, cursor: 'pointer', fontWeight: 500,
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+
           <Field label="Título do vídeo" required>
             <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
               required placeholder="Ex: Vídeo institucional" style={inputStyle} />
@@ -374,9 +426,47 @@ export default function ClientDetail() {
               </select>
             </Field>
           </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-            <button type="button" style={btnSoft} onClick={() => setShowCreateModal(false)}>Cancelar</button>
-            <button type="submit" style={btnPrimary}>Criar pedido</button>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', marginTop: 8 }}>
+            <div>
+              {!showSaveTemplate ? (
+                <button type="button" style={{ ...btnGhost, fontSize: 12, padding: '7px 12px' }}
+                  onClick={() => setShowSaveTemplate(true)}>
+                  <Icon name="plus" size={11} />
+                  Salvar como template
+                </button>
+              ) : (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    value={templateName}
+                    onChange={e => setTemplateName(e.target.value)}
+                    placeholder="Nome do template"
+                    style={{ ...inputStyle, width: 180, padding: '6px 10px', fontSize: 12 }}
+                  />
+                  <button type="button" style={{ ...btnPrimary, padding: '6px 10px', fontSize: 11 }}
+                    onClick={async () => {
+                      if (!templateName.trim()) return
+                      try {
+                        await api.templates.create({
+                          name: templateName,
+                          description: form.description,
+                          briefing: form.briefing,
+                          priority: form.priority,
+                          drive_links: form.drive_links,
+                        })
+                        setShowSaveTemplate(false)
+                        setTemplateName('')
+                        loadTemplates()
+                      } catch (err) { alert(err.message) }
+                    }}>Salvar</button>
+                  <button type="button" style={{ ...btnSoft, padding: '6px 10px', fontSize: 11 }}
+                    onClick={() => { setShowSaveTemplate(false); setTemplateName('') }}>X</button>
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" style={btnSoft} onClick={() => setShowCreateModal(false)}>Cancelar</button>
+              <button type="submit" style={btnPrimary}>Criar pedido</button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -431,6 +521,7 @@ export default function ClientDetail() {
             addComment={addComment} addCheckItem={addCheckItem} toggleCheck={toggleCheck}
             showDeleteConfirm={showDeleteConfirm} setShowDeleteConfirm={setShowDeleteConfirm}
             handleDelete={handleDeleteOrder}
+            handleDuplicate={handleDuplicateOrder}
             onClose={() => { setShowDetailModal(false); setShowDeleteConfirm(false) }}
             onUpdate={async (field, value) => {
               try {
@@ -450,11 +541,24 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
   const d = daysUntil(order.due_date)
   const overdue = d != null && d < 0
   const today = d === 0
+  const [showPreview, setShowPreview] = useState(false)
+  const hoverTimer = useRef(null)
+  const cardRef = useRef(null)
+
+  function onEnter() {
+    hoverTimer.current = setTimeout(() => setShowPreview(true), 400)
+  }
+  function onLeave(e) {
+    clearTimeout(hoverTimer.current)
+    setShowPreview(false)
+    e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.35)' : theme.colors.border
+  }
 
   return (
     <div
+      ref={cardRef}
       draggable
-      onDragStart={onDragStart}
+      onDragStart={e => { clearTimeout(hoverTimer.current); setShowPreview(false); onDragStart(e) }}
       onDragEnd={onDragEnd}
       onClick={onClick}
       style={{
@@ -465,10 +569,10 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
         cursor: 'grab',
         transition: 'all 0.12s',
         position: 'relative',
-        overflow: 'hidden',
+        overflow: 'visible',
       }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.5)' : theme.colors.borderLight }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.35)' : theme.colors.border }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.5)' : theme.colors.borderLight; onEnter() }}
+      onMouseLeave={onLeave}
     >
       <div style={{
         position: 'absolute', left: 0, top: 0, bottom: 0, width: 2,
@@ -527,6 +631,68 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
           </span>
         )}
       </div>
+
+      {/* Hover preview tooltip */}
+      {showPreview && (
+        <div style={{
+          position: 'absolute', left: '100%', top: 0, marginLeft: 8,
+          width: 300, padding: 14, zIndex: 999,
+          background: theme.colors.panel, border: `1px solid ${theme.colors.borderLight}`,
+          borderRadius: 10, boxShadow: theme.shadows.lg,
+          pointerEvents: 'none',
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text, marginBottom: 10 }}>{order.title}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <span style={{ color: theme.colors.textFaint, minWidth: 70 }}>Prioridade:</span>
+              <span style={{ color: PRIORITY[order.priority]?.color }}>{PRIORITY[order.priority]?.label}</span>
+            </div>
+            {order.editor_name && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ color: theme.colors.textFaint, minWidth: 70 }}>Editor:</span>
+                <span style={{ color: theme.colors.text }}>{order.editor_name}</span>
+              </div>
+            )}
+            {order.due_date && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ color: theme.colors.textFaint, minWidth: 70 }}>Prazo:</span>
+                <span style={{ color: overdue ? theme.colors.danger : theme.colors.text }}>
+                  {new Date(order.due_date).toLocaleDateString('pt-BR')}
+                  {overdue && ` (${Math.abs(d)}d atraso)`}
+                </span>
+              </div>
+            )}
+            {order.value > 0 && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ color: theme.colors.textFaint, minWidth: 70 }}>Valor:</span>
+                <span className="mono" style={{ color: theme.colors.mint }}>{fmtBRL(order.value)}</span>
+              </div>
+            )}
+            {order.editor_value > 0 && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ color: theme.colors.textFaint, minWidth: 70 }}>Valor editor:</span>
+                <span className="mono" style={{ color: theme.colors.primary }}>{fmtBRL(order.editor_value)}</span>
+              </div>
+            )}
+            {order.description && (
+              <div style={{ marginTop: 4 }}>
+                <div style={{ color: theme.colors.textFaint, marginBottom: 3 }}>Descrição:</div>
+                <div style={{ color: theme.colors.textSecondary, lineHeight: 1.4, whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
+                  {order.description}
+                </div>
+              </div>
+            )}
+            {order.briefing && (
+              <div style={{ marginTop: 4 }}>
+                <div style={{ color: theme.colors.textFaint, marginBottom: 3 }}>Briefing:</div>
+                <div style={{ color: theme.colors.textSecondary, lineHeight: 1.4, whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
+                  {order.briefing}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -535,7 +701,7 @@ function OrderDetail({
   order, comments, checklist, editors, columns, userRole,
   newComment, setNewComment, newCheckItem, setNewCheckItem,
   addComment, addCheckItem, toggleCheck,
-  showDeleteConfirm, setShowDeleteConfirm, handleDelete,
+  showDeleteConfirm, setShowDeleteConfirm, handleDelete, handleDuplicate,
   onUpdate, onClose,
 }) {
   const isGestor = userRole === 'gestor'
@@ -615,7 +781,18 @@ function OrderDetail({
               {new Date(order.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
               {overdue && <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.danger }}>{Math.abs(d)}d atraso</span>}
             </span>
-          ) : '—' },
+          ) : isGestor ? (
+            <input
+              type="date"
+              onChange={e => { if (e.target.value) onUpdate('due_date', e.target.value) }}
+              style={{
+                background: 'transparent', border: `1px dashed ${theme.colors.border}`,
+                borderRadius: 4, outline: 'none', padding: '2px 6px',
+                color: theme.colors.primary, fontSize: 12, cursor: 'pointer',
+                fontFamily: theme.fonts.mono,
+              }}
+            />
+          ) : <span style={{ color: theme.colors.textFaint }}>Sem prazo</span> },
           { k: 'Editor', v: (
             <select value={order.editor_id || ''}
               onChange={e => onUpdate('editor_id', Number(e.target.value) || null)}
@@ -846,7 +1023,14 @@ function OrderDetail({
             </div>
           </div>
 
-          <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${theme.colors.border}` }}>
+          <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `1px solid ${theme.colors.border}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              onClick={handleDuplicate}
+              style={{ ...btnSoft, width: '100%', justifyContent: 'center' }}
+            >
+              <Icon name="plus" size={13} />
+              Duplicar pedido
+            </button>
             <button
               onClick={() => setShowDeleteConfirm(true)}
               style={{ ...btnDanger, width: '100%', justifyContent: 'center' }}

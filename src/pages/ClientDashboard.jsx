@@ -440,7 +440,12 @@ export default function ClientDashboard() {
 
       {/* Order detail modal */}
       <Modal open={!!selectedOrder} onClose={() => setSelectedOrder(null)} width={560}>
-        {selectedOrder && <ClientOrderDetail order={selectedOrder} />}
+        {selectedOrder && <ClientOrderDetail order={selectedOrder} onAction={() => {
+          setSelectedOrder(null)
+          // reload data
+          setLoading(true)
+          api.clientPortal.getProjects().then(d => { setData(d); setLoading(false) }).catch(() => setLoading(false))
+        }} />}
       </Modal>
     </div>
   )
@@ -517,9 +522,36 @@ function ClientOrderCard({ order, onClick }) {
   )
 }
 
-function ClientOrderDetail({ order }) {
+function ClientOrderDetail({ order, onAction }) {
   const d = daysUntil(order.due_date)
   const overdue = d != null && d < 0
+  const [showCorrection, setShowCorrection] = useState(false)
+  const [correctionText, setCorrectionText] = useState('')
+  const [correctionTimestamp, setCorrectionTimestamp] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const isEdited = order.column_name === 'Editado'
+  const isApproved = order.approved
+
+  async function handleApprove() {
+    setSubmitting(true)
+    try {
+      await api.clientPortal.approve(order.id)
+      if (onAction) onAction()
+    } catch (err) { alert(err.message) } finally { setSubmitting(false) }
+  }
+
+  async function handleRequestChanges() {
+    if (!correctionText.trim()) return
+    setSubmitting(true)
+    try {
+      await api.clientPortal.requestChanges(order.id, {
+        text: correctionText,
+        timestamp_mark: correctionTimestamp || null,
+      })
+      if (onAction) onAction()
+    } catch (err) { alert(err.message) } finally { setSubmitting(false) }
+  }
 
   return (
     <div>
@@ -539,6 +571,16 @@ function ClientOrderDetail({ order }) {
                 {order.column_name}
               </span>
             </>
+          )}
+          {isApproved && (
+            <span style={{
+              padding: '2px 8px', borderRadius: 4,
+              background: 'rgba(0,210,150,0.12)', color: theme.colors.mint,
+              fontSize: 10, fontFamily: theme.fonts.mono, fontWeight: 600,
+              letterSpacing: '0.05em', textTransform: 'uppercase',
+            }}>
+              aprovado
+            </span>
           )}
           {order.priority && !['normal', 'low'].includes(order.priority) && (
             <span style={{
@@ -598,7 +640,7 @@ function ClientOrderDetail({ order }) {
         </div>
       )}
 
-      {/* Briefing (client can see briefing too) */}
+      {/* Briefing */}
       {order.briefing && (
         <div style={{ marginBottom: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>Briefing</div>
@@ -614,18 +656,114 @@ function ClientOrderDetail({ order }) {
 
       {/* Drive links */}
       {order.drive_links && (
-        <div>
+        <div style={{ marginBottom: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>Links</div>
-          <a href={order.drive_links} target="_blank" rel="noopener noreferrer" style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '10px 12px', background: theme.colors.bg,
-            border: `1px solid ${theme.colors.border}`, borderRadius: 8,
-            fontSize: 12.5, color: theme.colors.primary, wordBreak: 'break-all',
-          }}>
-            <Icon name="drive" size={13} />
-            <span style={{ flex: 1 }}>{order.drive_links}</span>
-            <Icon name="arrowRight" size={11} stroke />
-          </a>
+          {order.drive_links.split('\n').filter(Boolean).map((link, i) => (
+            <a key={i} href={link} target="_blank" rel="noopener noreferrer" style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '10px 12px', background: theme.colors.bg,
+              border: `1px solid ${theme.colors.border}`, borderRadius: 8,
+              fontSize: 12.5, color: theme.colors.primary, wordBreak: 'break-all',
+              marginBottom: 6,
+            }}>
+              <Icon name="drive" size={13} />
+              <span style={{ flex: 1 }}>{link}</span>
+              <Icon name="arrowRight" size={11} stroke />
+            </a>
+          ))}
+        </div>
+      )}
+
+      {/* Approve / Request changes (only show when order is in "Editado" column and not yet approved) */}
+      {isEdited && !isApproved && (
+        <div style={{
+          marginTop: 8, padding: 16,
+          background: theme.colors.bgSecondary,
+          border: `1px solid ${theme.colors.border}`,
+          borderRadius: 10,
+        }}>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Avaliacao do video</div>
+
+          {!showCorrection ? (
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={handleApprove}
+                disabled={submitting}
+                style={{
+                  flex: 1, padding: '11px 16px', borderRadius: 8,
+                  background: theme.colors.mint, color: '#0a0d13',
+                  fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  opacity: submitting ? 0.6 : 1,
+                }}
+              >
+                <Icon name="check" size={14} />
+                Aprovar video
+              </button>
+              <button
+                onClick={() => setShowCorrection(true)}
+                style={{
+                  flex: 1, padding: '11px 16px', borderRadius: 8,
+                  background: theme.colors.warmMuted, color: theme.colors.warm,
+                  fontSize: 13, fontWeight: 600, border: `1px solid rgba(255,183,77,0.3)`, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                <Icon name="message" size={14} />
+                Pedir correcao
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <textarea
+                value={correctionText}
+                onChange={e => setCorrectionText(e.target.value)}
+                placeholder="Descreva o que precisa ser corrigido..."
+                rows={3}
+                style={{
+                  width: '100%', padding: 12, background: theme.colors.bg,
+                  border: `1px solid ${theme.colors.border}`, borderRadius: 8,
+                  color: theme.colors.text, fontSize: 13, fontFamily: theme.fonts.ui,
+                  resize: 'vertical', outline: 'none',
+                }}
+              />
+              <input
+                value={correctionTimestamp}
+                onChange={e => setCorrectionTimestamp(e.target.value)}
+                placeholder="Timestamp (ex: 01:30) — opcional"
+                style={{
+                  width: '100%', padding: '8px 12px', background: theme.colors.bg,
+                  border: `1px solid ${theme.colors.border}`, borderRadius: 8,
+                  color: theme.colors.text, fontSize: 12.5, fontFamily: theme.fonts.mono,
+                  outline: 'none',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={handleRequestChanges}
+                  disabled={submitting || !correctionText.trim()}
+                  style={{
+                    flex: 1, padding: '10px 16px', borderRadius: 8,
+                    background: theme.colors.warm, color: '#0a0d13',
+                    fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer',
+                    opacity: submitting || !correctionText.trim() ? 0.5 : 1,
+                  }}
+                >
+                  {submitting ? 'Enviando...' : 'Enviar correcao'}
+                </button>
+                <button
+                  onClick={() => { setShowCorrection(false); setCorrectionText(''); setCorrectionTimestamp('') }}
+                  style={{
+                    padding: '10px 16px', borderRadius: 8,
+                    background: theme.colors.bgSecondary, color: theme.colors.textMuted,
+                    fontSize: 13, fontWeight: 500, border: `1px solid ${theme.colors.border}`, cursor: 'pointer',
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

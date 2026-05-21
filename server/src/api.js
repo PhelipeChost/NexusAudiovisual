@@ -1611,6 +1611,181 @@ router.put('/settings', authMiddleware, requireRole('gestor'), (req, res) => {
   res.json(company)
 })
 
+// ============ EDITOR DELIVER ============
+
+router.post('/editor/orders/:id/deliver', authMiddleware, requireRole('editor'), (req, res) => {
+  const { delivery_link } = req.body
+  const uid = req.user.id
+  const order = get('SELECT * FROM orders WHERE id = ? AND editor_id = ?', [req.params.id, uid])
+  if (!order) return res.status(404).json({ error: 'Pedido não encontrado' })
+
+  // Find "Editado" column for this client
+  const editadoCol = get(
+    "SELECT id FROM kanban_columns WHERE client_id = ? AND name = 'Editado'",
+    [order.client_id]
+  )
+
+  // Save the delivery link in drive_links (append if exists)
+  const newLinks = order.drive_links
+    ? order.drive_links + '\n' + (delivery_link || '')
+    : (delivery_link || '')
+
+  run(
+    'UPDATE orders SET drive_links = ?, column_id = COALESCE(?, column_id), updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [newLinks, editadoCol?.id, req.params.id]
+  )
+
+  // Notify gestor(s)
+  const gestors = all(
+    "SELECT id FROM users WHERE company_id = ? AND role = 'gestor' AND active = 1",
+    [order.company_id]
+  )
+  for (const g of gestors) {
+    run('INSERT INTO notifications (company_id, user_id, type, title, message, reference_id, reference_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [order.company_id, g.id, 'delivery', 'Entrega realizada', `Editor entregou "${order.title}"`, order.id, 'order']
+    )
+  }
+
+  run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
+    [order.company_id, uid, 'delivered', 'order', req.params.id, `Editor entregou "${order.title}"`]
+  )
+
+  res.json({ success: true })
+})
+
+// ============ EDITOR REPORT ============
+
+router.get('/editor/report', authMiddleware, requireRole('gestor'), (req, res) => {
+  const cid = req.user.company_id
+
+  // Get all editors linked to this company (direct + membership)
+  const directEditors = all(
+    "SELECT u.id, u.name, u.avatar FROM users u WHERE u.company_id = ? AND u.role = 'editor' AND u.active = 1",
+    [cid]
+  )
+  const memberEditors = all(
+    `SELECT u.id, u.name, u.avatar FROM team_memberships tm
+     JOIN users u ON u.id = tm.user_id
+     WHERE tm.company_id = ? AND u.active = 1`,
+    [cid]
+  )
+  const editorMap = new Map()
+  for (const e of [...directEditors, ...memberEditors]) {
+    editorMap.set(e.id, e)
+  }
+
+  const editors = Array.from(editorMap.values()).map(editor => {
+    const total = get(
+      'SELECT COUNT(*) as count FROM orders WHERE editor_id = ? AND company_id = ?',
+      [editor.id, cid]
+    ).count
+
+    const completed = get(
+      `SELECT COUNT(*) as count FROM orders o
+       JOIN kanban_columns kc ON kc.id = o.column_id
+       WHERE o.editor_id = ? AND o.company_id = ? AND kc.name = 'Finalizado'`,
+      [editor.id, cid]
+    ).count
+
+    const onTime = get(
+      `SELECT COUNT(*) as count FROM orders o
+       JOIN kanban_columns kc ON kc.id = o.column_id
+       WHERE o.editor_id = ? AND o.company_id = ? AND kc.name = 'Finalizado'
+         AND (o.due_date IS NULL OR o.updated_at <= o.due_date || ' 23:59:59')`,
+      [editor.id, cid]
+    ).count
+
+    const late = get(
+      `SELECT COUNT(*) as count FROM orders o
+       JOIN kanban_columns kc ON kc.id = o.column_id
+       WHERE o.editor_id = ? AND o.company_id = ? AND kc.name = 'Finalizado'
+         AND o.due_date IS NOT NULL AND o.updated_at > o.due_date || ' 23:59:59'`,
+      [editor.id, cid]
+    ).count
+
+    const inProgress = get(
+      `SELECT COUNT(*) as count FROM orders o
+       JOIN kanban_columns kc ON kc.id = o.column_id
+       WHERE o.editor_id = ? AND o.company_id = ? AND kc.name NOT IN ('Finalizado', 'Não iniciado')`,
+      [editor.id, cid]
+    ).count
+
+    const overdue = get(
+      `SELECT COUNT(*) as count FROM orders o
+       JOIN kanban_columns kc ON kc.id = o.column_id
+       WHERE o.editor_id = ? AND o.company_id = ? AND kc.name != 'Finalizado'
+         AND o.due_date < date('now') AND o.due_date IS NOT NULL`,
+      [editor.id, cid]
+    ).count
+
+    const totalValue = get(
+      'SELECT COALESCE(SUM(editor_value), 0) as total FROM orders WHERE editor_id = ? AND company_id = ?',
+      [editor.id, cid]
+    ).total
+
+    return {
+      ...editor,
+      total, completed, onTime, late, inProgress, overdue, totalValue,
+    }
+  })
+
+  res.json({ editors })
+})
+
+// ============ ORDER TEMPLATES ============
+
+router.get('/templates', authMiddleware, requireRole('gestor'), (req, res) => {
+  const templates = all(
+    'SELECT * FROM order_templates WHERE company_id = ? ORDER BY created_at DESC',
+    [req.user.company_id]
+  )
+  res.json(templates)
+})
+
+router.post('/templates', authMiddleware, requireRole('gestor'), (req, res) => {
+  const { name, description, briefing, priority, drive_links } = req.body
+  if (!name) return res.status(400).json({ error: 'Nome é obrigatório' })
+  const result = run(
+    'INSERT INTO order_templates (company_id, name, description, briefing, priority, drive_links) VALUES (?, ?, ?, ?, ?, ?)',
+    [req.user.company_id, name, description || null, briefing || null, priority || 'normal', drive_links || null]
+  )
+  res.json({ id: result.lastInsertRowid, name, description, briefing, priority, drive_links })
+})
+
+router.delete('/templates/:id', authMiddleware, requireRole('gestor'), (req, res) => {
+  run('DELETE FROM order_templates WHERE id = ? AND company_id = ?', [req.params.id, req.user.company_id])
+  res.json({ success: true })
+})
+
+// ============ CALENDAR EVENTS ============
+
+router.get('/calendar', authMiddleware, (req, res) => {
+  const cid = req.user.company_id
+  const { month } = req.query // format: YYYY-MM
+
+  let where = 'o.company_id = ? AND o.due_date IS NOT NULL'
+  const params = [cid]
+  if (month) {
+    where += " AND o.due_date LIKE ? || '%'"
+    params.push(month)
+  }
+
+  const orders = all(
+    `SELECT o.id, o.title, o.due_date, o.priority, o.approved,
+       kc.name as column_name, kc.color as column_color,
+       c.name as client_name, u.name as editor_name
+     FROM orders o
+     LEFT JOIN kanban_columns kc ON kc.id = o.column_id
+     LEFT JOIN clients c ON c.id = o.client_id
+     LEFT JOIN users u ON u.id = o.editor_id
+     WHERE ${where}
+     ORDER BY o.due_date`,
+    params
+  )
+
+  res.json({ orders })
+})
+
 // ============ ACTIVITY LOG ============
 
 router.get('/activity', authMiddleware, (req, res) => {

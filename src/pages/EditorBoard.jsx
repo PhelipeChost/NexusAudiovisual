@@ -89,6 +89,11 @@ export default function EditorBoard() {
     setDragOverCol(colId)
   }
 
+  async function handleDeliver(orderId, deliveryLink) {
+    await api.editorPortal.deliver(orderId, { delivery_link: deliveryLink })
+    loadData()
+  }
+
   async function handleDrop(e, columnId, colName) {
     e.preventDefault()
     setDragOverCol(null)
@@ -195,10 +200,11 @@ export default function EditorBoard() {
                 {colOrders.map(order => (
                   <EditorOrderCard
                     key={order.id}
-                    order={order}
+                    order={{ ...order, column_name: column.name }}
                     locked={locked}
                     onDragStart={e => handleDragStart(e, order, column.name)}
                     onDragEnd={handleDragEnd}
+                    onDeliver={handleDeliver}
                   />
                 ))}
                 {colOrders.length === 0 && !locked && (
@@ -220,10 +226,18 @@ export default function EditorBoard() {
   )
 }
 
-function EditorOrderCard({ order, locked, onDragStart, onDragEnd }) {
+function EditorOrderCard({ order, locked, onDragStart, onDragEnd, onDeliver }) {
   const d = daysUntil(order.due_date)
   const overdue = d != null && d < 0
   const today = d === 0
+  const [showDeliver, setShowDeliver] = useState(false)
+  const [deliveryLink, setDeliveryLink] = useState('')
+  const [delivering, setDelivering] = useState(false)
+
+  // Show deliver button on columns that are editable (not locked) — typically "Para edição" or "Correção"
+  const canDeliver = !locked && !['editado', 'finalizado', 'nao iniciado', 'liberado'].includes(
+    (order.column_name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  )
 
   return (
     <div
@@ -279,15 +293,82 @@ function EditorOrderCard({ order, locked, onDragStart, onDragEnd }) {
         {order.drive_links && <Icon name="drive" size={11} color={theme.colors.textFaint} />}
       </div>
 
-      {order.editor_value > 0 && (
-        <div style={{
-          marginTop: 10, paddingTop: 8,
-          borderTop: `1px solid ${theme.colors.borderSoft}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-        }}>
-          <span className="mono tnum" style={{ fontSize: 11, color: theme.colors.mint, fontWeight: 500 }}>
+      <div style={{
+        marginTop: 10, paddingTop: 8,
+        borderTop: `1px solid ${theme.colors.borderSoft}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+      }}>
+        {canDeliver && !showDeliver && (
+          <button
+            onClick={e => { e.stopPropagation(); setShowDeliver(true) }}
+            style={{
+              padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+              background: theme.colors.mint, color: '#0a0d13', border: 'none',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <Icon name="check" size={11} />
+            Entregar
+          </button>
+        )}
+        {!canDeliver && <span />}
+        {order.editor_value > 0 && (
+          <span className="mono tnum" style={{ fontSize: 11, color: theme.colors.mint, fontWeight: 500, marginLeft: 'auto' }}>
             {fmtBRL(order.editor_value)}
           </span>
+        )}
+      </div>
+
+      {/* Deliver modal inline */}
+      {showDeliver && (
+        <div style={{
+          marginTop: 10, padding: 10, borderRadius: 8,
+          background: theme.colors.bgSecondary, border: `1px solid ${theme.colors.border}`,
+        }} onClick={e => e.stopPropagation()}>
+          <div style={{ fontSize: 11.5, color: theme.colors.textMuted, marginBottom: 6 }}>Link de entrega:</div>
+          <input
+            autoFocus
+            value={deliveryLink}
+            onChange={e => setDeliveryLink(e.target.value)}
+            placeholder="https://drive.google.com/..."
+            style={{
+              width: '100%', padding: '6px 10px', background: theme.colors.bg,
+              border: `1px solid ${theme.colors.border}`, borderRadius: 6,
+              color: theme.colors.text, fontSize: 12, outline: 'none',
+              fontFamily: theme.fonts.ui, marginBottom: 8,
+            }}
+          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={async () => {
+                setDelivering(true)
+                try {
+                  await onDeliver(order.id, deliveryLink)
+                  setShowDeliver(false)
+                  setDeliveryLink('')
+                } catch (err) { alert(err.message) }
+                setDelivering(false)
+              }}
+              disabled={delivering}
+              style={{
+                flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                background: theme.colors.mint, color: '#0a0d13', border: 'none',
+                cursor: 'pointer', opacity: delivering ? 0.5 : 1,
+              }}
+            >
+              {delivering ? 'Enviando...' : 'Confirmar entrega'}
+            </button>
+            <button
+              onClick={() => { setShowDeliver(false); setDeliveryLink('') }}
+              style={{
+                padding: '6px 10px', borderRadius: 6, fontSize: 11,
+                background: theme.colors.bg, color: theme.colors.textMuted,
+                border: `1px solid ${theme.colors.border}`, cursor: 'pointer',
+              }}
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       )}
     </div>

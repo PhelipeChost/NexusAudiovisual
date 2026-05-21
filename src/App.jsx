@@ -13,6 +13,8 @@ import Invite from './pages/Invite'
 import ClientDashboard from './pages/ClientDashboard'
 import EditorDashboard from './pages/EditorDashboard'
 import EditorBoard from './pages/EditorBoard'
+import Calendar from './pages/Calendar'
+import EditorReport from './pages/EditorReport'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -51,6 +53,8 @@ export default function App() {
         <Route path="clients/:id" element={<ClientDetail />} />
         <Route path="team" element={<Team />} />
         <Route path="financial" element={<Financial />} />
+        <Route path="calendar" element={<Calendar />} />
+        <Route path="reports" element={<EditorReport />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

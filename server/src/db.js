@@ -322,6 +322,21 @@ async function initDb() {
   try { db.run('ALTER TABLE orders ADD COLUMN value REAL DEFAULT 0') } catch {}
   try { db.run('ALTER TABLE orders ADD COLUMN editor_value REAL DEFAULT 0') } catch {}
 
+  // Order templates table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS order_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      briefing TEXT,
+      priority TEXT DEFAULT 'normal',
+      drive_links TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (company_id) REFERENCES companies(id)
+    )
+  `)
+
   saveDb()
   return db
 }

@@ -77,6 +77,7 @@ const api = {
   editorPortal: {
     getDashboard: () => request('/editor/dashboard'),
     getBoard: () => request('/editor/board'),
+    deliver: (orderId, data) => request(`/editor/orders/${orderId}/deliver`, { method: 'POST', body: JSON.stringify(data) }),
   },
 
   orders: {
@@ -131,6 +132,20 @@ const api = {
 
     // Daily records
     upsertDailyRecord: (data) => request('/financial/daily-record', { method: 'PUT', body: JSON.stringify(data) }),
+  },
+
+  templates: {
+    list: () => request('/templates'),
+    create: (data) => request('/templates', { method: 'POST', body: JSON.stringify(data) }),
+    delete: (id) => request(`/templates/${id}`, { method: 'DELETE' }),
+  },
+
+  calendar: {
+    get: (month) => request(`/calendar?month=${month || ''}`),
+  },
+
+  reports: {
+    editors: () => request('/editor/report'),
   },
 
   notifications: {
