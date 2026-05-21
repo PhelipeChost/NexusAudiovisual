@@ -156,6 +156,8 @@ const api = {
     plans: () => request('/admin/plans'),
     updatePlan: (id, data) => request(`/admin/plans/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteCompany: (id) => request(`/admin/companies/${id}`, { method: 'DELETE' }),
+    getSettings: () => request('/admin/settings'),
+    updateSettings: (settings) => request('/admin/settings', { method: 'PUT', body: JSON.stringify({ settings }) }),
   },
 
   subscription: {

@@ -389,6 +389,15 @@ async function initDb() {
     )
   `)
 
+  // Platform settings (admin-configurable key-value store)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
   // Migrate role constraint to include 'admin'
   try { db.run("UPDATE users SET role = role WHERE 1=0") } catch {} // no-op to avoid issues
 

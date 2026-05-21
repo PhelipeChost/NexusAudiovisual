@@ -113,6 +113,7 @@ export default function AdminDashboard() {
         {[
           { id: 'overview', label: 'Empresas' },
           { id: 'payments', label: 'Pagamentos' },
+          { id: 'settings', label: 'Configuracoes' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: '6px 16px', fontSize: 12.5, borderRadius: 6,
@@ -240,6 +241,9 @@ export default function AdminDashboard() {
           )}
         </div>
       )}
+
+      {/* Platform settings */}
+      {tab === 'settings' && <PlatformSettingsPanel />}
 
       {/* Company management modal */}
       <Modal open={!!selectedCompany} onClose={() => setSelectedCompany(null)} title={`Gerenciar: ${selectedCompany?.name}`} width={520}>
@@ -431,6 +435,159 @@ function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, onDeleteCom
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function PlatformSettingsPanel() {
+  const [settings, setSettings] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [mpToken, setMpToken] = useState('')
+  const [showToken, setShowToken] = useState(false)
+  const [appUrl, setAppUrl] = useState('')
+
+  useEffect(() => { loadSettings() }, [])
+
+  async function loadSettings() {
+    try {
+      const data = await api.admin.getSettings()
+      setSettings(data)
+      setMpToken(data.mp_access_token?.hasValue ? data.mp_access_token.value : '')
+      setAppUrl(data.app_url?.value || 'https://reinonexusideal.com.br')
+    } catch (err) { console.error(err) } finally { setLoading(false) }
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setSaved(false)
+    try {
+      const updates = {}
+      // Only send token if it's not the masked version
+      if (mpToken && !/^\*+/.test(mpToken)) {
+        updates.mp_access_token = mpToken
+      }
+      if (appUrl) updates.app_url = appUrl
+
+      await api.admin.updateSettings(updates)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+      loadSettings()
+    } catch (err) { alert(err.message) } finally { setSaving(false) }
+  }
+
+  if (loading) return <div style={{ padding: 20, color: theme.colors.textMuted }}>Carregando...</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 700 }}>
+      <div style={{ ...panelStyle, padding: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 8,
+            background: '#009ee3', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, fontWeight: 800, color: '#fff',
+          }}>MP</div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: theme.colors.text }}>Mercado Pago</div>
+            <div style={{ fontSize: 12, color: theme.colors.textMuted }}>Integracão para cobranças de assinatura</div>
+          </div>
+          {settings.mp_access_token?.hasValue && (
+            <span style={{
+              marginLeft: 'auto',
+              padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+              background: 'rgba(0,210,150,0.12)', color: theme.colors.mint,
+              textTransform: 'uppercase', letterSpacing: '0.05em',
+            }}>
+              Configurado
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>Access Token (Producão)</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input
+                  type={showToken ? 'text' : 'password'}
+                  value={mpToken}
+                  onChange={e => setMpToken(e.target.value)}
+                  placeholder="APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  style={{ ...inputStyle, width: '100%', paddingRight: 40, fontFamily: 'monospace', fontSize: 12 }}
+                />
+                <button
+                  onClick={() => setShowToken(!showToken)}
+                  style={{
+                    position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: theme.colors.textMuted, fontSize: 11, padding: '4px 6px',
+                  }}
+                >
+                  {showToken ? 'ocultar' : 'ver'}
+                </button>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 6, lineHeight: 1.4 }}>
+              Token de producão do Mercado Pago (APP_USR-...). Encontre em:{' '}
+              <span style={{ color: theme.colors.primary }}>mercadopago.com.br/developers → Suas integracoes → Credenciais de producão</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>URL da Plataforma</label>
+            <input
+              type="text"
+              value={appUrl}
+              onChange={e => setAppUrl(e.target.value)}
+              placeholder="https://reinonexusideal.com.br"
+              style={{ ...inputStyle, width: '100%', fontFamily: 'monospace', fontSize: 12 }}
+            />
+            <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 6 }}>
+              URL base para redirecionamento apos pagamento e webhooks.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              ...btnPrimary,
+              opacity: saving ? 0.6 : 1,
+              cursor: saving ? 'wait' : 'pointer',
+            }}
+          >
+            <Icon name="check" size={13} />
+            {saving ? 'Salvando...' : 'Salvar configuracoes'}
+          </button>
+          {saved && (
+            <span style={{ fontSize: 12, color: theme.colors.mint, fontWeight: 500 }}>
+              Configuracoes salvas com sucesso!
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Webhook info */}
+      <div style={{ ...panelStyle, padding: 20 }}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>Webhook (IPN)</div>
+        <div style={{ fontSize: 13, color: theme.colors.textSecondary, lineHeight: 1.6 }}>
+          Configure este URL de notificacao no painel do Mercado Pago para receber confirmacoes de pagamento automaticamente:
+        </div>
+        <div style={{
+          marginTop: 10, padding: '10px 14px', borderRadius: 8,
+          background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+          fontFamily: 'monospace', fontSize: 12, color: theme.colors.primary,
+          wordBreak: 'break-all',
+        }}>
+          {appUrl || 'https://reinonexusideal.com.br'}/audiovisual/api/payment/webhook
+        </div>
+        <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 8 }}>
+          No Mercado Pago: Suas integracoes → Notificacoes IPN → URL de notificacao
+        </div>
       </div>
     </div>
   )

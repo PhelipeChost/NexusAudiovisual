@@ -7,13 +7,18 @@ import { generateToken, authMiddleware, requireRole, requireActiveSubscription }
 
 const router = Router()
 
-// Mercado Pago config (initialized lazily when token is available)
+// Mercado Pago config (reads token from platform_settings in DB)
 let mpClient = null
+let mpTokenCache = null
 function getMPClient() {
-  if (mpClient) return mpClient
-  const token = process.env.MP_ACCESS_TOKEN
-  if (!token) return null
-  mpClient = new MercadoPagoConfig({ accessToken: token })
+  const row = get("SELECT value FROM platform_settings WHERE key = 'mp_access_token'")
+  const token = row?.value || process.env.MP_ACCESS_TOKEN || ''
+  if (!token) { mpClient = null; mpTokenCache = null; return null }
+  // Rebuild client if token changed
+  if (token !== mpTokenCache) {
+    mpClient = new MercadoPagoConfig({ accessToken: token })
+    mpTokenCache = token
+  }
   return mpClient
 }
 
@@ -1983,6 +1988,53 @@ router.put('/admin/plans/:id', authMiddleware, requireRole('admin'), (req, res) 
   res.json(get('SELECT * FROM plans WHERE id = ?', [req.params.id]))
 })
 
+// ============ PLATFORM SETTINGS (admin) ============
+
+// Get platform settings (admin only — returns masked secrets)
+router.get('/admin/settings', authMiddleware, requireRole('admin'), (req, res) => {
+  const rows = all('SELECT key, value, updated_at FROM platform_settings')
+  const settings = {}
+  for (const row of rows) {
+    // Mask sensitive tokens — only show last 8 chars
+    if (row.key.includes('token') || row.key.includes('secret')) {
+      settings[row.key] = {
+        value: row.value ? ('*'.repeat(Math.max(0, row.value.length - 8)) + row.value.slice(-8)) : '',
+        hasValue: !!row.value,
+        updated_at: row.updated_at,
+      }
+    } else {
+      settings[row.key] = { value: row.value || '', hasValue: !!row.value, updated_at: row.updated_at }
+    }
+  }
+  res.json(settings)
+})
+
+// Update platform settings (admin only)
+router.put('/admin/settings', authMiddleware, requireRole('admin'), (req, res) => {
+  const { settings } = req.body
+  if (!settings || typeof settings !== 'object') {
+    return res.status(400).json({ error: 'Formato inválido' })
+  }
+
+  for (const [key, value] of Object.entries(settings)) {
+    // Skip masked values (don't overwrite with asterisks)
+    if (typeof value === 'string' && /^\*+/.test(value)) continue
+
+    const existing = get('SELECT key FROM platform_settings WHERE key = ?', [key])
+    if (existing) {
+      run('UPDATE platform_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?', [value, key])
+    } else {
+      run('INSERT INTO platform_settings (key, value) VALUES (?, ?)', [key, value])
+    }
+  }
+
+  // Reset MP client cache so it picks up new token
+  mpClient = null
+  mpTokenCache = null
+
+  res.json({ success: true })
+})
+
 // Delete company and ALL its data (cascading delete)
 router.delete('/admin/companies/:id', authMiddleware, requireRole('admin'), (req, res) => {
   const companyId = parseInt(req.params.id)
@@ -2069,7 +2121,8 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
     if (!sub) return res.status(400).json({ error: 'Nenhuma assinatura encontrada' })
 
     const basePath = process.env.BASE_PATH || '/audiovisual'
-    const baseUrl = process.env.APP_URL || 'https://reinonexusideal.com.br'
+    const appUrlRow = get("SELECT value FROM platform_settings WHERE key = 'app_url'")
+    const baseUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
 
     const preference = new Preference(client)
     const result = await preference.create({
