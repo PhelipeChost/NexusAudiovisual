@@ -148,6 +148,24 @@ const api = {
     editors: () => request('/editor/report'),
   },
 
+  admin: {
+    dashboard: () => request('/admin/dashboard'),
+    companies: () => request('/admin/companies'),
+    updateSubscription: (companyId, data) => request(`/admin/subscriptions/${companyId}`, { method: 'PUT', body: JSON.stringify(data) }),
+    recordPayment: (data) => request('/admin/payments', { method: 'POST', body: JSON.stringify(data) }),
+    plans: () => request('/admin/plans'),
+    updatePlan: (id, data) => request(`/admin/plans/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  },
+
+  subscription: {
+    get: () => request('/subscription'),
+  },
+
+  public: {
+    plans: () => fetch(`${BASE_URL}/public/plans`).then(r => r.json()),
+    stats: () => fetch(`${BASE_URL}/public/stats`).then(r => r.json()),
+  },
+
   notifications: {
     get: () => request('/notifications'),
     readAll: () => request('/notifications/read-all', { method: 'PUT' }),

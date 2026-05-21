@@ -37,7 +37,7 @@ async function initDb() {
       name TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('gestor','editor','cliente','supervisor')),
+      role TEXT NOT NULL CHECK(role IN ('admin','gestor','editor','cliente','supervisor')),
       phone TEXT,
       pix_key TEXT,
       bank_info TEXT,
@@ -336,6 +336,68 @@ async function initDb() {
       FOREIGN KEY (company_id) REFERENCES companies(id)
     )
   `)
+
+  // SaaS plans table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      price REAL NOT NULL DEFAULT 0,
+      description TEXT,
+      max_editors INTEGER DEFAULT -1,
+      max_clients INTEGER DEFAULT -1,
+      max_orders_month INTEGER DEFAULT -1,
+      active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  // Subscriptions per company
+  db.run(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL UNIQUE,
+      plan_id INTEGER,
+      status TEXT DEFAULT 'trial' CHECK(status IN ('trial','active','past_due','cancelled','suspended')),
+      trial_ends_at DATETIME,
+      current_period_start DATETIME,
+      current_period_end DATETIME,
+      mp_subscription_id TEXT,
+      mp_payer_email TEXT,
+      cancelled_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (plan_id) REFERENCES plans(id)
+    )
+  `)
+
+  // Payment history
+  db.run(`
+    CREATE TABLE IF NOT EXISTS subscription_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subscription_id INTEGER NOT NULL,
+      company_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','refunded')),
+      payment_method TEXT,
+      mp_payment_id TEXT,
+      paid_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),
+      FOREIGN KEY (company_id) REFERENCES companies(id)
+    )
+  `)
+
+  // Migrate role constraint to include 'admin'
+  try { db.run("UPDATE users SET role = role WHERE 1=0") } catch {} // no-op to avoid issues
+
+  // Seed default plan if none exists
+  const planCount = db.exec("SELECT COUNT(*) FROM plans")[0]?.values[0][0] || 0
+  if (planCount === 0) {
+    db.run(`INSERT INTO plans (name, price, description, max_editors, max_clients, max_orders_month)
+            VALUES ('Profissional', 97.00, 'Acesso completo a todas as ferramentas', -1, -1, -1)`)
+  }
 
   saveDb()
   return db

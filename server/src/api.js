@@ -2,9 +2,23 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { run, get, all, createDefaultColumns } from './db.js'
-import { generateToken, authMiddleware, requireRole } from './auth.js'
+import { generateToken, authMiddleware, requireRole, requireActiveSubscription } from './auth.js'
 
 const router = Router()
+
+// ============ PUBLIC ROUTES (landing page data) ============
+
+router.get('/public/plans', (req, res) => {
+  const plans = all('SELECT id, name, price, description, max_editors, max_clients, max_orders_month FROM plans WHERE active = 1 ORDER BY price')
+  res.json(plans)
+})
+
+router.get('/public/stats', (req, res) => {
+  const companies = get('SELECT COUNT(*) as count FROM companies').count
+  const orders = get('SELECT COUNT(*) as count FROM orders').count
+  const editors = get("SELECT COUNT(*) as count FROM users WHERE role = 'editor'").count
+  res.json({ companies, orders, editors })
+})
 
 // ============ AUTH ============
 
@@ -63,6 +77,14 @@ router.post('/auth/register', (req, res) => {
     [companyId, name, email, hash, 'gestor']
   )
 
+  // Create trial subscription (7 days)
+  const defaultPlan = get('SELECT id FROM plans WHERE active = 1 ORDER BY price LIMIT 1')
+  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  run(
+    'INSERT INTO subscriptions (company_id, plan_id, status, trial_ends_at) VALUES (?, ?, ?, ?)',
+    [companyId, defaultPlan?.id || null, 'trial', trialEnd]
+  )
+
   const user = { id: userResult.lastInsertRowid, company_id: companyId, role: 'gestor', name, email }
   const token = generateToken(user)
   res.json({ token, user: { id: user.id, name, email, role: 'gestor', company_id: companyId } })
@@ -110,6 +132,16 @@ router.get('/auth/me', authMiddleware, (req, res) => {
       [user.id]
     )
   }
+
+  // Attach subscription info for gestor
+  if (user.role === 'gestor' || user.role === 'admin') {
+    const sub = get(
+      'SELECT s.*, p.name as plan_name, p.price as plan_price FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+      [user.company_id]
+    )
+    user.subscription = sub || null
+  }
+
   res.json(user)
 })
 
@@ -1803,6 +1835,150 @@ router.get('/activity', authMiddleware, (req, res) => {
     [req.user.company_id]
   )
   res.json(logs)
+})
+
+// ============ ADMIN PANEL ============
+
+// Admin dashboard — overview of all companies
+router.get('/admin/dashboard', authMiddleware, requireRole('admin'), (req, res) => {
+  const totalCompanies = get("SELECT COUNT(*) as count FROM companies").count
+  const totalUsers = get("SELECT COUNT(*) as count FROM users WHERE active = 1").count
+  const totalGestors = get("SELECT COUNT(*) as count FROM users WHERE role = 'gestor' AND active = 1").count
+  const totalOrders = get("SELECT COUNT(*) as count FROM orders").count
+
+  const activeSubs = get("SELECT COUNT(*) as count FROM subscriptions WHERE status = 'active'").count
+  const trialSubs = get("SELECT COUNT(*) as count FROM subscriptions WHERE status = 'trial'").count
+  const cancelledSubs = get("SELECT COUNT(*) as count FROM subscriptions WHERE status IN ('cancelled','suspended')").count
+
+  const mrr = get("SELECT COALESCE(SUM(p.price), 0) as total FROM subscriptions s JOIN plans p ON p.id = s.plan_id WHERE s.status = 'active'").total
+
+  const recentPayments = all(
+    `SELECT sp.*, c.name as company_name FROM subscription_payments sp
+     JOIN companies c ON c.id = sp.company_id
+     ORDER BY sp.created_at DESC LIMIT 20`
+  )
+
+  // Recent signups
+  const recentCompanies = all(
+    `SELECT c.id, c.name, c.logo, c.created_at,
+       (SELECT COUNT(*) FROM orders WHERE company_id = c.id) as order_count,
+       (SELECT COUNT(*) FROM users WHERE company_id = c.id AND role = 'editor') as editor_count,
+       (SELECT COUNT(*) FROM clients WHERE company_id = c.id AND active = 1) as client_count,
+       s.status as sub_status, s.trial_ends_at, s.current_period_end,
+       p.name as plan_name, p.price as plan_price
+     FROM companies c
+     LEFT JOIN subscriptions s ON s.company_id = c.id
+     LEFT JOIN plans p ON p.id = s.plan_id
+     ORDER BY c.created_at DESC LIMIT 50`
+  )
+
+  res.json({
+    stats: { totalCompanies, totalUsers, totalGestors, totalOrders, activeSubs, trialSubs, cancelledSubs, mrr },
+    recentPayments,
+    companies: recentCompanies,
+  })
+})
+
+// List all companies with details
+router.get('/admin/companies', authMiddleware, requireRole('admin'), (req, res) => {
+  const companies = all(
+    `SELECT c.*,
+       (SELECT COUNT(*) FROM orders WHERE company_id = c.id) as order_count,
+       (SELECT COUNT(*) FROM users WHERE company_id = c.id AND role = 'editor' AND active = 1) as editor_count,
+       (SELECT COUNT(*) FROM users WHERE company_id = c.id AND role = 'gestor' AND active = 1) as gestor_count,
+       (SELECT COUNT(*) FROM clients WHERE company_id = c.id AND active = 1) as client_count,
+       s.id as sub_id, s.status as sub_status, s.trial_ends_at, s.current_period_start, s.current_period_end,
+       p.name as plan_name, p.price as plan_price,
+       (SELECT u.name FROM users u WHERE u.company_id = c.id AND u.role = 'gestor' LIMIT 1) as gestor_name,
+       (SELECT u.email FROM users u WHERE u.company_id = c.id AND u.role = 'gestor' LIMIT 1) as gestor_email
+     FROM companies c
+     LEFT JOIN subscriptions s ON s.company_id = c.id
+     LEFT JOIN plans p ON p.id = s.plan_id
+     ORDER BY c.created_at DESC`
+  )
+  res.json(companies)
+})
+
+// Update subscription status (manual control)
+router.put('/admin/subscriptions/:companyId', authMiddleware, requireRole('admin'), (req, res) => {
+  const { status, plan_id, current_period_end } = req.body
+  const companyId = req.params.companyId
+
+  const existing = get('SELECT id FROM subscriptions WHERE company_id = ?', [companyId])
+
+  if (existing) {
+    const updates = []
+    const params = []
+    if (status) { updates.push('status = ?'); params.push(status) }
+    if (plan_id) { updates.push('plan_id = ?'); params.push(plan_id) }
+    if (current_period_end) { updates.push('current_period_end = ?'); params.push(current_period_end) }
+    if (status === 'active' && !current_period_end) {
+      // Set period to 30 days from now
+      const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+      updates.push('current_period_start = ?', 'current_period_end = ?')
+      params.push(new Date().toISOString(), end)
+    }
+    updates.push('updated_at = CURRENT_TIMESTAMP')
+    params.push(companyId)
+    run(`UPDATE subscriptions SET ${updates.join(', ')} WHERE company_id = ?`, params)
+  } else {
+    const defaultPlan = get('SELECT id FROM plans WHERE active = 1 ORDER BY price LIMIT 1')
+    const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    run(
+      'INSERT INTO subscriptions (company_id, plan_id, status, current_period_start, current_period_end) VALUES (?, ?, ?, ?, ?)',
+      [companyId, plan_id || defaultPlan?.id, status || 'active', new Date().toISOString(), end]
+    )
+  }
+
+  const sub = get(
+    'SELECT s.*, p.name as plan_name FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+    [companyId]
+  )
+  res.json(sub)
+})
+
+// Record a manual payment
+router.post('/admin/payments', authMiddleware, requireRole('admin'), (req, res) => {
+  const { company_id, amount, payment_method, notes } = req.body
+  const sub = get('SELECT id FROM subscriptions WHERE company_id = ?', [company_id])
+  if (!sub) return res.status(404).json({ error: 'Assinatura não encontrada' })
+
+  run(
+    'INSERT INTO subscription_payments (subscription_id, company_id, amount, status, payment_method, paid_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+    [sub.id, company_id, amount, 'approved', payment_method || 'manual']
+  )
+
+  // Activate subscription and extend period by 30 days
+  const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  run(
+    'UPDATE subscriptions SET status = ?, current_period_start = ?, current_period_end = ?, updated_at = CURRENT_TIMESTAMP WHERE company_id = ?',
+    ['active', new Date().toISOString(), end, company_id]
+  )
+
+  res.json({ success: true })
+})
+
+// Manage plans
+router.get('/admin/plans', authMiddleware, requireRole('admin'), (req, res) => {
+  res.json(all('SELECT * FROM plans ORDER BY price'))
+})
+
+router.put('/admin/plans/:id', authMiddleware, requireRole('admin'), (req, res) => {
+  const { name, price, description, max_editors, max_clients, max_orders_month, active } = req.body
+  run(
+    'UPDATE plans SET name = COALESCE(?, name), price = COALESCE(?, price), description = COALESCE(?, description), max_editors = COALESCE(?, max_editors), max_clients = COALESCE(?, max_clients), max_orders_month = COALESCE(?, max_orders_month), active = COALESCE(?, active) WHERE id = ?',
+    [name, price, description, max_editors, max_clients, max_orders_month, active, req.params.id]
+  )
+  res.json(get('SELECT * FROM plans WHERE id = ?', [req.params.id]))
+})
+
+// Get subscription status (for current user's company)
+router.get('/subscription', authMiddleware, (req, res) => {
+  const sub = get(
+    'SELECT s.*, p.name as plan_name, p.price as plan_price, p.max_editors, p.max_clients, p.max_orders_month FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+    [req.user.company_id]
+  )
+  res.json(sub || { status: 'none' })
 })
 
 export default router

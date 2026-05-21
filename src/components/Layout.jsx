@@ -11,14 +11,15 @@ export const SidebarContext = createContext({ collapsed: false })
 export function useSidebar() { return useContext(SidebarContext) }
 
 const ALL_NAV_ITEMS = [
-  { path: '/', label: 'Panorama',      icon: 'dashboard', roles: ['gestor', 'editor', 'cliente'], end: true },
+  { path: '/', label: 'Panorama',      icon: 'dashboard', roles: ['gestor', 'editor', 'cliente', 'admin'], end: true },
   { path: '/board', label: 'Mapa',     icon: 'film', roles: ['editor'] },
   { path: '/clients', label: 'Clientes', icon: 'clients', roles: ['gestor'] },
   { path: '/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
   { path: '/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
   { path: '/calendar', label: 'Calendario', icon: 'calendar', roles: ['gestor'] },
   { path: '/reports', label: 'Relatorios', icon: 'briefcase', roles: ['gestor'] },
-  { path: '/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente'] },
+  { path: '/admin', label: 'Administracao', icon: 'settings', roles: ['admin'] },
+  { path: '/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente', 'admin'] },
 ]
 
 const PAGE_TITLES = {
@@ -29,6 +30,7 @@ const PAGE_TITLES = {
   '/financial': 'Financeiro',
   '/calendar': 'Calendario',
   '/reports': 'Relatorios',
+  '/admin': 'Administracao',
   '/settings': 'Configuracoes',
 }
 
@@ -47,7 +49,16 @@ export default function Layout() {
     try { return localStorage.getItem('nexus_sidebar_collapsed') === '1' } catch { return false }
   })
 
+  const [subscription, setSubscription] = useState(null)
+
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(user?.role))
+
+  // Load subscription info for gestors
+  useEffect(() => {
+    if (user?.role === 'gestor') {
+      api.subscription.get().then(d => setSubscription(d)).catch(() => {})
+    }
+  }, [user?.role])
 
   function toggleSidebar() {
     setCollapsed(prev => {
@@ -365,6 +376,40 @@ export default function Layout() {
               </div>
           </div>
         </header>
+
+        {/* Subscription banner for gestors */}
+        {subscription && user?.role === 'gestor' && (() => {
+          const s = subscription
+          if (s.status === 'trial') {
+            const daysLeft = s.trial_ends_at ? Math.max(0, Math.ceil((new Date(s.trial_ends_at) - new Date()) / 86400000)) : 0
+            return (
+              <div style={{
+                padding: '10px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: 'rgba(127, 219, 255, 0.08)', borderBottom: `1px solid rgba(127, 219, 255, 0.15)`,
+                fontSize: 13,
+              }}>
+                <span style={{ color: theme.colors.primary }}>
+                  ⏱ Periodo de teste: <strong>{daysLeft} dias restantes</strong>
+                </span>
+                <span style={{ color: theme.colors.textMuted, fontSize: 12 }}>
+                  Contate o suporte para ativar sua assinatura
+                </span>
+              </div>
+            )
+          }
+          if (s.status === 'past_due') {
+            return (
+              <div style={{
+                padding: '10px 28px', display: 'flex', alignItems: 'center', gap: 8,
+                background: 'rgba(217, 183, 112, 0.08)', borderBottom: `1px solid rgba(217, 183, 112, 0.15)`,
+                fontSize: 13, color: theme.colors.warning,
+              }}>
+                ⚠ Pagamento pendente. Regularize sua assinatura para evitar interrupcoes.
+              </div>
+            )
+          }
+          return null
+        })()}
 
         {/* Page content */}
         <main style={{ flex: 1, padding: '24px 20px 48px', overflowY: 'auto' }}>

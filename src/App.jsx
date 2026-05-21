@@ -15,6 +15,8 @@ import EditorDashboard from './pages/EditorDashboard'
 import EditorBoard from './pages/EditorBoard'
 import Calendar from './pages/Calendar'
 import EditorReport from './pages/EditorReport'
+import AdminDashboard from './pages/AdminDashboard'
+import LandingPage from './pages/LandingPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -22,8 +24,17 @@ function ProtectedRoute({ children }) {
   return user ? children : <Navigate to="/login" />
 }
 
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth()
+  if (loading) return null
+  if (!user) return <Navigate to="/login" />
+  if (user.role !== 'admin') return <Navigate to="/" />
+  return children
+}
+
 function RoleDashboard() {
   const { user } = useAuth()
+  if (user?.role === 'admin') return <AdminDashboard />
   if (user?.role === 'cliente') return <ClientDashboard />
   if (user?.role === 'editor') return <EditorDashboard />
   return <Dashboard />
@@ -43,9 +54,13 @@ export default function App() {
 
   return (
     <Routes>
+      {/* Landing page — only for unauthenticated users */}
+      <Route path="/landing" element={user ? <Navigate to="/" /> : <LandingPage />} />
       <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
       <Route path="/register" element={user ? <Navigate to="/" /> : <Register />} />
       <Route path="/invite/:token" element={<Invite />} />
+
+      {/* Protected app routes */}
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<RoleDashboard />} />
         <Route path="board" element={<EditorBoard />} />
@@ -55,8 +70,12 @@ export default function App() {
         <Route path="financial" element={<Financial />} />
         <Route path="calendar" element={<Calendar />} />
         <Route path="reports" element={<EditorReport />} />
+        <Route path="admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
         <Route path="settings" element={<Settings />} />
       </Route>
+
+      {/* Catch-all: unauthenticated go to landing, authenticated go to dashboard */}
+      <Route path="*" element={user ? <Navigate to="/" /> : <Navigate to="/landing" />} />
     </Routes>
   )
 }
