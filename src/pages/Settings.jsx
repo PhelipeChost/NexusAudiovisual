@@ -11,6 +11,7 @@ import {
 
 const ALL_TABS = [
   { id: 'workspace', label: 'Workspace', roles: ['gestor'] },
+  { id: 'subscription', label: 'Plano & Pagamento', roles: ['gestor'] },
   { id: 'columns', label: 'Etapas do kanban', roles: ['gestor'] },
   { id: 'account', label: 'Sua conta', roles: ['gestor', 'editor', 'cliente'] },
 ]
@@ -39,6 +40,7 @@ export default function Settings() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
         {tab === 'workspace' && <WorkspaceSettings />}
+        {tab === 'subscription' && <SubscriptionSettings />}
         {tab === 'columns' && <ColumnsSettings />}
         {tab === 'account' && <AccountSettings />}
       </div>
@@ -149,6 +151,232 @@ function WorkspaceSettings() {
           </div>
         </Row>
       </Section>
+    </>
+  )
+}
+
+function SubscriptionSettings() {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [paying, setPaying] = useState(false)
+  const [paymentMsg, setPaymentMsg] = useState('')
+
+  useEffect(() => {
+    loadStatus()
+    // Check URL for payment result
+    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    if (params.get('payment') === 'success') {
+      setPaymentMsg('Pagamento aprovado! Sua assinatura foi ativada.')
+      // Clean URL
+      window.history.replaceState(null, '', window.location.pathname + window.location.hash.split('?')[0])
+      setTimeout(() => loadStatus(), 2000)
+    } else if (params.get('payment') === 'failure') {
+      setPaymentMsg('Pagamento nao foi concluido. Tente novamente.')
+      window.history.replaceState(null, '', window.location.pathname + window.location.hash.split('?')[0])
+    } else if (params.get('payment') === 'pending') {
+      setPaymentMsg('Pagamento pendente. Aguarde a confirmacao.')
+      window.history.replaceState(null, '', window.location.pathname + window.location.hash.split('?')[0])
+    }
+  }, [])
+
+  async function loadStatus() {
+    try {
+      const d = await api.payment.status()
+      setData(d)
+    } catch (err) { console.error(err) } finally { setLoading(false) }
+  }
+
+  async function handlePay() {
+    setPaying(true)
+    setPaymentMsg('')
+    try {
+      const pref = await api.payment.createPreference()
+      if (pref.init_point) {
+        window.location.href = pref.init_point
+      } else {
+        setPaymentMsg('Erro: link de pagamento nao gerado')
+      }
+    } catch (err) {
+      setPaymentMsg(err.message || 'Erro ao iniciar pagamento')
+    } finally { setPaying(false) }
+  }
+
+  if (loading) return <Spinner />
+
+  const sub = data?.subscription || {}
+  const isActive = sub.status === 'active'
+  const isTrial = sub.status === 'trial'
+  const trialDays = isTrial && sub.trial_ends_at
+    ? Math.max(0, Math.ceil((new Date(sub.trial_ends_at) - Date.now()) / 86400000))
+    : null
+  const periodEnd = sub.current_period_end ? new Date(sub.current_period_end).toLocaleDateString('pt-BR') : null
+
+  const STATUS_MAP = {
+    trial: { label: 'Trial', color: theme.colors.warm, bg: theme.colors.warmMuted },
+    active: { label: 'Ativo', color: theme.colors.mint, bg: 'rgba(0,210,150,0.12)' },
+    past_due: { label: 'Vencido', color: theme.colors.danger, bg: theme.colors.dangerMuted },
+    cancelled: { label: 'Cancelado', color: theme.colors.textMuted, bg: theme.colors.bgSecondary },
+    suspended: { label: 'Suspenso', color: theme.colors.danger, bg: theme.colors.dangerMuted },
+  }
+  const st = STATUS_MAP[sub.status] || { label: 'Sem plano', color: theme.colors.textFaint, bg: theme.colors.bgSecondary }
+
+  return (
+    <>
+      <div>
+        <h2 className="display" style={{ fontSize: 26, color: theme.colors.text, margin: 0 }}>Plano & Pagamento</h2>
+        <p style={{ fontSize: 13, color: theme.colors.textMuted, marginTop: 4 }}>
+          Gerencie sua assinatura do Nexus Audiovisual.
+        </p>
+      </div>
+
+      {paymentMsg && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 10,
+          background: paymentMsg.includes('aprovado') || paymentMsg.includes('ativada')
+            ? 'rgba(0,210,150,0.12)' : paymentMsg.includes('pendente')
+            ? theme.colors.warmMuted : theme.colors.dangerMuted,
+          border: `1px solid ${paymentMsg.includes('aprovado') || paymentMsg.includes('ativada')
+            ? 'rgba(0,210,150,0.3)' : paymentMsg.includes('pendente')
+            ? 'rgba(255,138,107,0.3)' : 'rgba(244,115,131,0.3)'}`,
+          color: paymentMsg.includes('aprovado') || paymentMsg.includes('ativada')
+            ? theme.colors.mint : paymentMsg.includes('pendente')
+            ? theme.colors.warm : theme.colors.danger,
+          fontSize: 13, fontWeight: 500,
+        }}>
+          {paymentMsg}
+        </div>
+      )}
+
+      {/* Current plan */}
+      <div style={{ ...panelStyle, padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Seu plano</div>
+            <div className="display" style={{ fontSize: 24, color: theme.colors.text }}>{sub.plan_name || 'Profissional'}</div>
+          </div>
+          <span style={{
+            padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+            background: st.bg, color: st.color,
+            fontFamily: theme.fonts?.mono, textTransform: 'uppercase', letterSpacing: '0.05em',
+          }}>
+            {st.label}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+          <div style={{ padding: 14, background: theme.colors.bg, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Valor mensal</div>
+            <div className="display tnum" style={{ fontSize: 22, color: theme.colors.primary }}>
+              R${(sub.plan_price || 97).toFixed(0)}
+            </div>
+          </div>
+          <div style={{ padding: 14, background: theme.colors.bg, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>
+              {isTrial ? 'Trial expira em' : 'Proximo vencimento'}
+            </div>
+            <div className="display tnum" style={{ fontSize: 16, color: theme.colors.text }}>
+              {isTrial && trialDays !== null ? `${trialDays} dias` : periodEnd || '---'}
+            </div>
+          </div>
+          <div style={{ padding: 14, background: theme.colors.bg, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Metodo</div>
+            <div style={{ fontSize: 14, color: theme.colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="financial" size={14} color={theme.colors.primary} />
+              Mercado Pago
+            </div>
+          </div>
+        </div>
+
+        {/* Pay button */}
+        {!isActive && data?.mpConfigured && (
+          <button
+            onClick={handlePay}
+            disabled={paying}
+            style={{
+              ...btnPrimary,
+              justifyContent: 'center', width: '100%',
+              padding: '14px 20px', fontSize: 15,
+              background: '#009ee3',
+              opacity: paying ? 0.6 : 1,
+              cursor: paying ? 'wait' : 'pointer',
+            }}
+            onMouseOver={e => { if (!paying) e.target.style.background = '#0077b5' }}
+            onMouseOut={e => e.target.style.background = '#009ee3'}
+          >
+            {paying ? 'Redirecionando...' : `Pagar R$${(sub.plan_price || 97).toFixed(0)} via Mercado Pago`}
+          </button>
+        )}
+
+        {isActive && (
+          <div style={{
+            padding: '12px 16px', borderRadius: 10,
+            background: 'rgba(0,210,150,0.08)',
+            border: '1px solid rgba(0,210,150,0.2)',
+            color: theme.colors.mint, fontSize: 13, fontWeight: 500,
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <Icon name="check" size={14} />
+            Sua assinatura esta ativa ate {periodEnd}.
+          </div>
+        )}
+
+        {!data?.mpConfigured && !isActive && (
+          <div style={{
+            padding: '12px 16px', borderRadius: 10,
+            background: theme.colors.warmMuted,
+            border: '1px solid rgba(255,138,107,0.3)',
+            color: theme.colors.warm, fontSize: 13,
+          }}>
+            Pagamento via Mercado Pago sera ativado em breve. Entre em contato com o suporte.
+          </div>
+        )}
+      </div>
+
+      {/* Payment history */}
+      {data?.payments?.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Historico de pagamentos</div>
+          <div style={{ ...panelStyle, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: theme.colors.bgSecondary }}>
+                  {['Valor', 'Metodo', 'Status', 'Data'].map(h => (
+                    <th key={h} className="eyebrow" style={{
+                      padding: '10px 14px', textAlign: 'left',
+                      borderBottom: `1px solid ${theme.colors.border}`,
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.payments.map(p => (
+                  <tr key={p.id} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                    <td className="mono tnum" style={{ padding: '10px 14px', fontSize: 13, color: theme.colors.mint, fontWeight: 500 }}>
+                      R${parseFloat(p.amount).toFixed(2)}
+                    </td>
+                    <td style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textMuted }}>
+                      {p.payment_method === 'mercadopago' ? 'Mercado Pago' : p.payment_method || 'manual'}
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <span style={{
+                        padding: '2px 6px', borderRadius: 3, fontSize: 10, fontWeight: 600,
+                        background: p.status === 'approved' ? 'rgba(0,210,150,0.12)' : 'rgba(255,183,77,0.12)',
+                        color: p.status === 'approved' ? theme.colors.mint : theme.colors.warm,
+                        textTransform: 'uppercase',
+                      }}>
+                        {p.status === 'approved' ? 'pago' : p.status}
+                      </span>
+                    </td>
+                    <td className="mono tnum" style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textMuted }}>
+                      {p.paid_at ? new Date(p.paid_at).toLocaleDateString('pt-BR') : '---'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </>
   )
 }

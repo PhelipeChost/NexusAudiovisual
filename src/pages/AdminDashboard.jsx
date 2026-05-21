@@ -55,6 +55,15 @@ export default function AdminDashboard() {
     } catch (err) { alert(err.message) } finally { setActionLoading(false) }
   }
 
+  async function deleteCompany(companyId, companyName) {
+    setActionLoading(true)
+    try {
+      await api.admin.deleteCompany(companyId)
+      setSelectedCompany(null)
+      loadData()
+    } catch (err) { alert(err.message) } finally { setActionLoading(false) }
+  }
+
   if (loading) return <Spinner />
   const stats = data?.stats || {}
 
@@ -239,6 +248,7 @@ export default function AdminDashboard() {
             company={selectedCompany}
             onUpdateSub={updateSub}
             onRecordPayment={recordPayment}
+            onDeleteCompany={deleteCompany}
             loading={actionLoading}
           />
         )}
@@ -247,9 +257,11 @@ export default function AdminDashboard() {
   )
 }
 
-function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, loading }) {
+function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, onDeleteCompany, loading }) {
   const st = SUB_STATUS[company.sub_status] || { label: 'Sem assinatura', color: theme.colors.textFaint }
   const [paymentAmount, setPaymentAmount] = useState(company.plan_price || '')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -348,6 +360,77 @@ function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, loading }) 
       </div>
       <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: -12 }}>
         Ao registrar o pagamento, a assinatura e ativada por mais 30 dias automaticamente.
+      </div>
+
+      {/* Delete zone */}
+      <div style={{
+        marginTop: 12, paddingTop: 20,
+        borderTop: `1px solid ${theme.colors.border}`,
+      }}>
+        <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.danger }}>Zona de perigo</div>
+        {!showDeleteConfirm ? (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            style={{
+              ...btnDanger,
+              justifyContent: 'center', width: '100%',
+              background: 'transparent',
+              border: `1px solid ${theme.colors.danger}`,
+              color: theme.colors.danger,
+            }}
+          >
+            <Icon name="trash" size={13} />
+            Excluir empresa permanentemente
+          </button>
+        ) : (
+          <div style={{
+            padding: 16, borderRadius: 10,
+            background: theme.colors.dangerMuted,
+            border: `1px solid rgba(244, 115, 131, 0.3)`,
+            display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            <div style={{ fontSize: 13, color: theme.colors.danger, fontWeight: 600 }}>
+              Tem certeza absoluta?
+            </div>
+            <div style={{ fontSize: 12, color: theme.colors.textSecondary, lineHeight: 1.5 }}>
+              Esta acao vai excluir <strong>permanentemente</strong> a empresa <strong>{company.name}</strong> e todos os seus dados:
+              usuarios, clientes, pedidos, comentarios, financeiro, arquivos, assinatura e historico.
+              <br /><br />
+              Digite <strong style={{ color: theme.colors.danger }}>{company.name}</strong> para confirmar:
+            </div>
+            <input
+              value={deleteConfirmText}
+              onChange={e => setDeleteConfirmText(e.target.value)}
+              placeholder={`Digite "${company.name}" para confirmar`}
+              style={{
+                ...inputStyle,
+                borderColor: 'rgba(244, 115, 131, 0.4)',
+                fontSize: 13,
+              }}
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText('') }}
+                style={{ ...btnSoft, flex: 1, justifyContent: 'center' }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => onDeleteCompany(company.id, company.name)}
+                disabled={loading || deleteConfirmText !== company.name}
+                style={{
+                  ...btnDanger,
+                  flex: 1, justifyContent: 'center',
+                  opacity: (loading || deleteConfirmText !== company.name) ? 0.4 : 1,
+                  cursor: (loading || deleteConfirmText !== company.name) ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {loading ? 'Excluindo...' : 'Excluir definitivamente'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

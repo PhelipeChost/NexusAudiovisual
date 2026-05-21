@@ -155,10 +155,16 @@ const api = {
     recordPayment: (data) => request('/admin/payments', { method: 'POST', body: JSON.stringify(data) }),
     plans: () => request('/admin/plans'),
     updatePlan: (id, data) => request(`/admin/plans/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteCompany: (id) => request(`/admin/companies/${id}`, { method: 'DELETE' }),
   },
 
   subscription: {
     get: () => request('/subscription'),
+  },
+
+  payment: {
+    createPreference: () => request('/payment/create-preference', { method: 'POST' }),
+    status: () => request('/payment/status'),
   },
 
   public: {

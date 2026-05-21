@@ -1,10 +1,21 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
+import { MercadoPagoConfig, Preference, Payment as MPPayment } from 'mercadopago'
 import { run, get, all, createDefaultColumns } from './db.js'
 import { generateToken, authMiddleware, requireRole, requireActiveSubscription } from './auth.js'
 
 const router = Router()
+
+// Mercado Pago config (initialized lazily when token is available)
+let mpClient = null
+function getMPClient() {
+  if (mpClient) return mpClient
+  const token = process.env.MP_ACCESS_TOKEN
+  if (!token) return null
+  mpClient = new MercadoPagoConfig({ accessToken: token })
+  return mpClient
+}
 
 // ============ PUBLIC ROUTES (landing page data) ============
 
@@ -1972,6 +1983,65 @@ router.put('/admin/plans/:id', authMiddleware, requireRole('admin'), (req, res) 
   res.json(get('SELECT * FROM plans WHERE id = ?', [req.params.id]))
 })
 
+// Delete company and ALL its data (cascading delete)
+router.delete('/admin/companies/:id', authMiddleware, requireRole('admin'), (req, res) => {
+  const companyId = parseInt(req.params.id)
+
+  // Prevent deleting the admin's own company
+  if (companyId === req.user.company_id) {
+    return res.status(400).json({ error: 'Você não pode excluir sua própria empresa' })
+  }
+
+  const company = get('SELECT * FROM companies WHERE id = ?', [companyId])
+  if (!company) return res.status(404).json({ error: 'Empresa não encontrada' })
+
+  // Get all order IDs for this company (needed for child tables)
+  const orderIds = all('SELECT id FROM orders WHERE company_id = ?', [companyId]).map(o => o.id)
+  const clientIds = all('SELECT id FROM clients WHERE company_id = ?', [companyId]).map(c => c.id)
+  const invoiceIds = all('SELECT id FROM client_invoices WHERE company_id = ?', [companyId]).map(i => i.id)
+  const batchIds = all('SELECT id FROM editor_payment_batches WHERE company_id = ?', [companyId]).map(b => b.id)
+
+  // 1. Delete order child tables
+  if (orderIds.length > 0) {
+    const placeholders = orderIds.map(() => '?').join(',')
+    run(`DELETE FROM order_checklist WHERE order_id IN (${placeholders})`, orderIds)
+    run(`DELETE FROM comments WHERE order_id IN (${placeholders})`, orderIds)
+    run(`DELETE FROM versions WHERE order_id IN (${placeholders})`, orderIds)
+  }
+
+  // 2. Delete invoice/batch items
+  if (invoiceIds.length > 0) {
+    const ph = invoiceIds.map(() => '?').join(',')
+    run(`DELETE FROM client_invoice_items WHERE invoice_id IN (${ph})`, invoiceIds)
+  }
+  if (batchIds.length > 0) {
+    const ph = batchIds.map(() => '?').join(',')
+    run(`DELETE FROM editor_payment_items WHERE batch_id IN (${ph})`, batchIds)
+  }
+
+  // 3. Delete all company-level data
+  run('DELETE FROM orders WHERE company_id = ?', [companyId])
+  run('DELETE FROM kanban_columns WHERE company_id = ?', [companyId])
+  run('DELETE FROM invites WHERE company_id = ?', [companyId])
+  run('DELETE FROM client_invoices WHERE company_id = ?', [companyId])
+  run('DELETE FROM editor_payment_batches WHERE company_id = ?', [companyId])
+  run('DELETE FROM payments WHERE company_id = ?', [companyId])
+  run('DELETE FROM files WHERE company_id = ?', [companyId])
+  run('DELETE FROM notifications WHERE company_id = ?', [companyId])
+  run('DELETE FROM activity_log WHERE company_id = ?', [companyId])
+  run('DELETE FROM daily_records WHERE company_id = ?', [companyId])
+  run('DELETE FROM team_memberships WHERE company_id = ?', [companyId])
+  run('DELETE FROM team_invites WHERE company_id = ?', [companyId])
+  run('DELETE FROM order_templates WHERE company_id = ?', [companyId])
+  run('DELETE FROM subscription_payments WHERE company_id = ?', [companyId])
+  run('DELETE FROM subscriptions WHERE company_id = ?', [companyId])
+  run('DELETE FROM clients WHERE company_id = ?', [companyId])
+  run('DELETE FROM users WHERE company_id = ?', [companyId])
+  run('DELETE FROM companies WHERE id = ?', [companyId])
+
+  res.json({ success: true, message: `Empresa "${company.name}" e todos os dados foram excluídos` })
+})
+
 // Get subscription status (for current user's company)
 router.get('/subscription', authMiddleware, (req, res) => {
   const sub = get(
@@ -1979,6 +2049,141 @@ router.get('/subscription', authMiddleware, (req, res) => {
     [req.user.company_id]
   )
   res.json(sub || { status: 'none' })
+})
+
+// ============ MERCADO PAGO PAYMENT ============
+
+// Create checkout preference for subscription payment
+router.post('/payment/create-preference', authMiddleware, async (req, res) => {
+  try {
+    const client = getMPClient()
+    if (!client) return res.status(500).json({ error: 'Mercado Pago não configurado. Entre em contato com o suporte.' })
+
+    const user = get('SELECT * FROM users WHERE id = ?', [req.user.id])
+    const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
+    const sub = get(
+      'SELECT s.*, p.name as plan_name, p.price as plan_price FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+      [req.user.company_id]
+    )
+
+    if (!sub) return res.status(400).json({ error: 'Nenhuma assinatura encontrada' })
+
+    const basePath = process.env.BASE_PATH || '/audiovisual'
+    const baseUrl = process.env.APP_URL || 'https://reinonexusideal.com.br'
+
+    const preference = new Preference(client)
+    const result = await preference.create({
+      body: {
+        items: [
+          {
+            id: `nexus-sub-${sub.plan_id}`,
+            title: `Nexus Audiovisual - ${sub.plan_name || 'Profissional'}`,
+            description: `Assinatura mensal - ${company.name}`,
+            quantity: 1,
+            unit_price: sub.plan_price || 97,
+            currency_id: 'BRL',
+          }
+        ],
+        payer: {
+          email: user.email,
+          name: user.name,
+        },
+        external_reference: JSON.stringify({
+          company_id: req.user.company_id,
+          subscription_id: sub.id,
+          user_id: req.user.id,
+        }),
+        back_urls: {
+          success: `${baseUrl}${basePath}/#/settings?payment=success`,
+          failure: `${baseUrl}${basePath}/#/settings?payment=failure`,
+          pending: `${baseUrl}${basePath}/#/settings?payment=pending`,
+        },
+        auto_return: 'approved',
+        notification_url: `${baseUrl}${basePath}/api/payment/webhook`,
+      }
+    })
+
+    res.json({
+      id: result.id,
+      init_point: result.init_point,
+      sandbox_init_point: result.sandbox_init_point,
+    })
+  } catch (err) {
+    console.error('MP create preference error:', err)
+    res.status(500).json({ error: 'Erro ao criar pagamento: ' + (err.message || 'erro desconhecido') })
+  }
+})
+
+// Mercado Pago webhook (IPN notification)
+router.post('/payment/webhook', async (req, res) => {
+  try {
+    const { type, data } = req.body
+
+    if (type === 'payment') {
+      const client = getMPClient()
+      if (!client) return res.sendStatus(200)
+
+      const payment = new MPPayment(client)
+      const paymentData = await payment.get({ id: data.id })
+
+      if (paymentData.status === 'approved') {
+        let ref
+        try {
+          ref = JSON.parse(paymentData.external_reference)
+        } catch { ref = {} }
+
+        const companyId = ref.company_id
+        const subId = ref.subscription_id
+
+        if (companyId && subId) {
+          // Record payment
+          run(
+            'INSERT INTO subscription_payments (subscription_id, company_id, amount, status, payment_method, mp_payment_id, paid_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+            [subId, companyId, paymentData.transaction_amount, 'approved', 'mercadopago', String(data.id)]
+          )
+
+          // Activate subscription for 30 days
+          const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          run(
+            'UPDATE subscriptions SET status = ?, current_period_start = ?, current_period_end = ?, mp_payer_email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            ['active', new Date().toISOString(), end, paymentData.payer?.email || '', subId]
+          )
+
+          console.log(`[MP] Payment approved for company ${companyId}: R$${paymentData.transaction_amount}`)
+        }
+      }
+    }
+
+    res.sendStatus(200)
+  } catch (err) {
+    console.error('MP webhook error:', err)
+    res.sendStatus(200) // Always return 200 to MP
+  }
+})
+
+// Check payment status
+router.get('/payment/status', authMiddleware, (req, res) => {
+  const sub = get(
+    'SELECT s.*, p.name as plan_name, p.price as plan_price FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+    [req.user.company_id]
+  )
+
+  const lastPayment = get(
+    'SELECT * FROM subscription_payments WHERE company_id = ? ORDER BY created_at DESC LIMIT 1',
+    [req.user.company_id]
+  )
+
+  const payments = all(
+    'SELECT * FROM subscription_payments WHERE company_id = ? ORDER BY created_at DESC LIMIT 10',
+    [req.user.company_id]
+  )
+
+  res.json({
+    subscription: sub || { status: 'none' },
+    lastPayment,
+    payments,
+    mpConfigured: !!getMPClient(),
+  })
 })
 
 export default router
