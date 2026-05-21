@@ -348,6 +348,14 @@ async function initDb() {
       max_clients INTEGER DEFAULT -1,
       max_orders_month INTEGER DEFAULT -1,
       active INTEGER DEFAULT 1,
+      visible INTEGER DEFAULT 1,
+      featured INTEGER DEFAULT 0,
+      type TEXT DEFAULT 'Mensal (1 mes)',
+      benefits TEXT DEFAULT '[]',
+      discount_3m REAL DEFAULT 0,
+      discount_6m REAL DEFAULT 0,
+      discount_12m REAL DEFAULT 0,
+      position INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `)
@@ -401,11 +409,21 @@ async function initDb() {
   // Migrate role constraint to include 'admin'
   try { db.run("UPDATE users SET role = role WHERE 1=0") } catch {} // no-op to avoid issues
 
+  // Migrate plans table: add new columns
+  try { db.run('ALTER TABLE plans ADD COLUMN visible INTEGER DEFAULT 1') } catch {}
+  try { db.run('ALTER TABLE plans ADD COLUMN featured INTEGER DEFAULT 0') } catch {}
+  try { db.run('ALTER TABLE plans ADD COLUMN type TEXT DEFAULT \'Mensal (1 mes)\'') } catch {}
+  try { db.run('ALTER TABLE plans ADD COLUMN benefits TEXT DEFAULT \'[]\'') } catch {}
+  try { db.run('ALTER TABLE plans ADD COLUMN discount_3m REAL DEFAULT 0') } catch {}
+  try { db.run('ALTER TABLE plans ADD COLUMN discount_6m REAL DEFAULT 0') } catch {}
+  try { db.run('ALTER TABLE plans ADD COLUMN discount_12m REAL DEFAULT 0') } catch {}
+  try { db.run('ALTER TABLE plans ADD COLUMN position INTEGER DEFAULT 0') } catch {}
+
   // Seed default plan if none exists
   const planCount = db.exec("SELECT COUNT(*) FROM plans")[0]?.values[0][0] || 0
   if (planCount === 0) {
-    db.run(`INSERT INTO plans (name, price, description, max_editors, max_clients, max_orders_month)
-            VALUES ('Profissional', 97.00, 'Acesso completo a todas as ferramentas', -1, -1, -1)`)
+    db.run(`INSERT INTO plans (name, price, description, max_editors, max_clients, max_orders_month, visible, featured, type, benefits, discount_3m, discount_6m, discount_12m, position)
+            VALUES ('Profissional', 97.90, 'Acesso completo a todas as ferramentas', -1, -1, -1, 1, 1, 'Mensal (1 mes)', '[]', 10, 15, 20, 0)`)
   }
 
   saveDb()

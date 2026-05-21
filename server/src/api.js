@@ -25,7 +25,11 @@ function getMPClient() {
 // ============ PUBLIC ROUTES (landing page data) ============
 
 router.get('/public/plans', (req, res) => {
-  const plans = all('SELECT id, name, price, description, max_editors, max_clients, max_orders_month FROM plans WHERE active = 1 ORDER BY price')
+  const plans = all('SELECT id, name, price, description, max_editors, max_clients, max_orders_month, visible, featured, type, benefits, discount_3m, discount_6m, discount_12m, position FROM plans WHERE active = 1 AND visible = 1 AND price > 0 ORDER BY position, price')
+  // Parse benefits JSON
+  for (const p of plans) {
+    try { p.benefits = JSON.parse(p.benefits || '[]') } catch { p.benefits = [] }
+  }
   res.json(plans)
 })
 
@@ -1976,16 +1980,94 @@ router.post('/admin/payments', authMiddleware, requireRole('admin'), (req, res) 
 
 // Manage plans
 router.get('/admin/plans', authMiddleware, requireRole('admin'), (req, res) => {
-  res.json(all('SELECT * FROM plans ORDER BY price'))
+  const plans = all('SELECT * FROM plans ORDER BY position, price')
+  for (const p of plans) {
+    try { p.benefits = JSON.parse(p.benefits || '[]') } catch { p.benefits = [] }
+  }
+  res.json(plans)
+})
+
+router.post('/admin/plans', authMiddleware, requireRole('admin'), (req, res) => {
+  const { name, price, description, type, benefits, active, visible, featured, discount_3m, discount_6m, discount_12m } = req.body
+  if (!name) return res.status(400).json({ error: 'Nome do plano e obrigatorio' })
+
+  const maxPos = get('SELECT MAX(position) as mp FROM plans')?.mp || 0
+  const result = run(
+    `INSERT INTO plans (name, price, description, type, benefits, active, visible, featured, discount_3m, discount_6m, discount_12m, position)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      name,
+      price || 0,
+      description || '',
+      type || 'Mensal (1 mes)',
+      JSON.stringify(benefits || []),
+      active !== undefined ? (active ? 1 : 0) : 1,
+      visible !== undefined ? (visible ? 1 : 0) : 1,
+      featured ? 1 : 0,
+      discount_3m || 0,
+      discount_6m || 0,
+      discount_12m || 0,
+      maxPos + 1,
+    ]
+  )
+  const plan = get('SELECT * FROM plans WHERE id = ?', [result.lastInsertRowid])
+  try { plan.benefits = JSON.parse(plan.benefits || '[]') } catch { plan.benefits = [] }
+  res.json(plan)
 })
 
 router.put('/admin/plans/:id', authMiddleware, requireRole('admin'), (req, res) => {
-  const { name, price, description, max_editors, max_clients, max_orders_month, active } = req.body
+  const { name, price, description, type, benefits, active, visible, featured, discount_3m, discount_6m, discount_12m, position } = req.body
+
   run(
-    'UPDATE plans SET name = COALESCE(?, name), price = COALESCE(?, price), description = COALESCE(?, description), max_editors = COALESCE(?, max_editors), max_clients = COALESCE(?, max_clients), max_orders_month = COALESCE(?, max_orders_month), active = COALESCE(?, active) WHERE id = ?',
-    [name, price, description, max_editors, max_clients, max_orders_month, active, req.params.id]
+    `UPDATE plans SET
+      name = COALESCE(?, name),
+      price = COALESCE(?, price),
+      description = COALESCE(?, description),
+      type = COALESCE(?, type),
+      benefits = COALESCE(?, benefits),
+      active = COALESCE(?, active),
+      visible = COALESCE(?, visible),
+      featured = COALESCE(?, featured),
+      discount_3m = COALESCE(?, discount_3m),
+      discount_6m = COALESCE(?, discount_6m),
+      discount_12m = COALESCE(?, discount_12m),
+      position = COALESCE(?, position)
+    WHERE id = ?`,
+    [
+      name, price, description, type,
+      benefits !== undefined ? JSON.stringify(benefits) : null,
+      active !== undefined ? (active ? 1 : 0) : null,
+      visible !== undefined ? (visible ? 1 : 0) : null,
+      featured !== undefined ? (featured ? 1 : 0) : null,
+      discount_3m !== undefined ? discount_3m : null,
+      discount_6m !== undefined ? discount_6m : null,
+      discount_12m !== undefined ? discount_12m : null,
+      position !== undefined ? position : null,
+      req.params.id,
+    ]
   )
-  res.json(get('SELECT * FROM plans WHERE id = ?', [req.params.id]))
+
+  // If this plan is set as featured, un-feature all others
+  if (featured) {
+    run('UPDATE plans SET featured = 0 WHERE id != ?', [req.params.id])
+  }
+
+  const plan = get('SELECT * FROM plans WHERE id = ?', [req.params.id])
+  try { plan.benefits = JSON.parse(plan.benefits || '[]') } catch { plan.benefits = [] }
+  res.json(plan)
+})
+
+router.delete('/admin/plans/:id', authMiddleware, requireRole('admin'), (req, res) => {
+  const planId = parseInt(req.params.id)
+
+  // Check if any active subscription uses this plan
+  const activeSubs = get('SELECT COUNT(*) as count FROM subscriptions WHERE plan_id = ? AND status IN (\'trial\',\'active\')', [planId])
+  if (activeSubs?.count > 0) {
+    return res.status(400).json({ error: `Nao e possivel excluir: ${activeSubs.count} assinatura(s) ativa(s) usam este plano` })
+  }
+
+  run('DELETE FROM plans WHERE id = ?', [planId])
+  res.json({ success: true })
 })
 
 // ============ PLATFORM SETTINGS (admin) ============
@@ -2114,15 +2196,22 @@ function getPaymentDiscounts() {
 // Get payment config (public for authenticated users)
 router.get('/payment/config', authMiddleware, (req, res) => {
   const sub = get(
-    'SELECT s.*, p.name as plan_name, p.price as plan_price FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+    'SELECT s.*, p.name as plan_name, p.price as plan_price, p.discount_3m, p.discount_6m, p.discount_12m FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
     [req.user.company_id]
   )
-  const discounts = getPaymentDiscounts()
-  const basePrice = sub?.plan_price || 97
+  const basePrice = sub?.plan_price || 97.90
+
+  // Use per-plan discount config (falls back to global settings for legacy)
+  const planDiscount3 = sub?.discount_3m || 0
+  const planDiscount6 = sub?.discount_6m || 0
+  const planDiscount12 = sub?.discount_12m || 0
 
   // Build pricing tiers
   const tiers = [1, 3, 6, 12].map(months => {
-    const discountPct = months === 1 ? 0 : (discounts[String(months)] || 0)
+    let discountPct = 0
+    if (months === 3) discountPct = planDiscount3
+    else if (months === 6) discountPct = planDiscount6
+    else if (months === 12) discountPct = planDiscount12
     const pricePerMonth = basePrice * (1 - discountPct / 100)
     const total = Math.round(pricePerMonth * months * 100) / 100
     const savings = Math.round((basePrice * months - total) * 100) / 100
@@ -2152,16 +2241,18 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
     const user = get('SELECT * FROM users WHERE id = ?', [req.user.id])
     const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
     const sub = get(
-      'SELECT s.*, p.name as plan_name, p.price as plan_price FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+      'SELECT s.*, p.name as plan_name, p.price as plan_price, p.discount_3m, p.discount_6m, p.discount_12m FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
       [req.user.company_id]
     )
 
     if (!sub) return res.status(400).json({ error: 'Nenhuma assinatura encontrada' })
 
-    // Calculate price with discount
-    const discounts = getPaymentDiscounts()
-    const basePrice = sub.plan_price || 97
-    const discountPct = months === 1 ? 0 : (discounts[String(months)] || 0)
+    // Calculate price with per-plan discount
+    const basePrice = sub.plan_price || 97.90
+    let discountPct = 0
+    if (months === 3) discountPct = sub.discount_3m || 0
+    else if (months === 6) discountPct = sub.discount_6m || 0
+    else if (months === 12) discountPct = sub.discount_12m || 0
     const pricePerMonth = basePrice * (1 - discountPct / 100)
     const totalPrice = Math.round(pricePerMonth * months * 100) / 100
 

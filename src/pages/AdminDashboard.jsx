@@ -112,6 +112,7 @@ export default function AdminDashboard() {
       <div style={{ display: 'flex', gap: 4, padding: 2, background: theme.colors.bgSecondary, border: `1px solid ${theme.colors.border}`, borderRadius: 8, width: 'fit-content' }}>
         {[
           { id: 'overview', label: 'Empresas' },
+          { id: 'plans', label: 'Planos' },
           { id: 'payments', label: 'Pagamentos' },
           { id: 'settings', label: 'Configuracoes' },
         ].map(t => (
@@ -193,6 +194,9 @@ export default function AdminDashboard() {
           </table>
         </div>
       )}
+
+      {/* Plans */}
+      {tab === 'plans' && <PlansManagementPanel />}
 
       {/* Payments */}
       {tab === 'payments' && (
@@ -440,6 +444,355 @@ function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, onDeleteCom
   )
 }
 
+function PlansManagementPanel() {
+  const [plans, setPlans] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(null) // plan id being saved
+
+  useEffect(() => { loadPlans() }, [])
+
+  async function loadPlans() {
+    try {
+      const data = await api.admin.plans()
+      setPlans(data)
+    } catch (err) { console.error(err) } finally { setLoading(false) }
+  }
+
+  async function savePlan(plan) {
+    setSaving(plan.id)
+    try {
+      await api.admin.updatePlan(plan.id, plan)
+      loadPlans()
+    } catch (err) { alert(err.message) } finally { setSaving(null) }
+  }
+
+  async function createPlan() {
+    try {
+      await api.admin.createPlan({
+        name: 'Novo Plano',
+        price: 0,
+        type: 'Mensal (1 mes)',
+        benefits: [],
+        active: true,
+        visible: true,
+      })
+      loadPlans()
+    } catch (err) { alert(err.message) }
+  }
+
+  async function deletePlan(id) {
+    if (!confirm('Tem certeza que deseja excluir este plano?')) return
+    try {
+      await api.admin.deletePlan(id)
+      loadPlans()
+    } catch (err) { alert(err.message) }
+  }
+
+  async function toggleFeatured(plan) {
+    setSaving(plan.id)
+    try {
+      await api.admin.updatePlan(plan.id, { featured: !plan.featured })
+      loadPlans()
+    } catch (err) { alert(err.message) } finally { setSaving(null) }
+  }
+
+  function updateLocalPlan(id, updates) {
+    setPlans(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p))
+  }
+
+  if (loading) return <div style={{ padding: 20, color: theme.colors.textMuted }}>Carregando...</div>
+
+  const visibleCount = plans.filter(p => p.active && p.visible && p.price > 0).length
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: theme.colors.text }}>Planos Disponiveis</div>
+          <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: theme.colors.warm }}>&#128161;</span>
+            Planos desativados ou com preco R$0 ficam ocultos na home. Quando todos sao desativados, a secao de planos e removida completamente.
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: theme.colors.textMuted }}>
+          {visibleCount} visiveis na home
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(plans.length, 4)}, 1fr)`, gap: 14 }}>
+        {plans.map(plan => (
+          <PlanCard
+            key={plan.id}
+            plan={plan}
+            saving={saving === plan.id}
+            onSave={savePlan}
+            onDelete={() => deletePlan(plan.id)}
+            onToggleFeatured={() => toggleFeatured(plan)}
+            onLocalUpdate={(updates) => updateLocalPlan(plan.id, updates)}
+          />
+        ))}
+      </div>
+
+      <button
+        onClick={createPlan}
+        style={{
+          ...btnSoft,
+          justifyContent: 'center', width: '100%', padding: '14px 20px',
+          border: `2px dashed ${theme.colors.border}`, borderRadius: 12,
+          fontSize: 14, fontWeight: 500, color: theme.colors.textMuted,
+        }}
+      >
+        + Adicionar Plano
+      </button>
+    </div>
+  )
+}
+
+function PlanCard({ plan, saving, onSave, onDelete, onToggleFeatured, onLocalUpdate }) {
+  const [newBenefit, setNewBenefit] = useState('')
+
+  const isVisible = plan.active && plan.visible && plan.price > 0
+
+  function addBenefit() {
+    if (!newBenefit.trim()) return
+    const benefits = [...(plan.benefits || []), { text: newBenefit.trim(), included: true }]
+    onLocalUpdate({ benefits })
+    setNewBenefit('')
+  }
+
+  function removeBenefit(idx) {
+    const benefits = (plan.benefits || []).filter((_, i) => i !== idx)
+    onLocalUpdate({ benefits })
+  }
+
+  function toggleBenefitIncluded(idx) {
+    const benefits = (plan.benefits || []).map((b, i) => i === idx ? { ...b, included: !b.included } : b)
+    onLocalUpdate({ benefits })
+  }
+
+  return (
+    <div style={{
+      ...panelStyle,
+      padding: 0,
+      display: 'flex', flexDirection: 'column',
+      border: plan.featured ? `2px solid ${theme.colors.warm}` : `1px solid ${theme.colors.border}`,
+      position: 'relative',
+    }}>
+      {/* Top bar: visible indicator + active toggle + delete */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '10px 14px',
+        borderBottom: `1px solid ${theme.colors.border}`,
+        background: theme.colors.bgSecondary,
+      }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+          color: isVisible ? theme.colors.mint : theme.colors.textFaint,
+        }}>
+          &#8226; {isVisible ? 'VISIVEL' : 'OCULTO'}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 10.5, color: theme.colors.textMuted }}>Ativo</span>
+          <button
+            onClick={() => onLocalUpdate({ active: !plan.active })}
+            style={{
+              width: 36, height: 20, borderRadius: 10, cursor: 'pointer', border: 'none',
+              background: plan.active ? theme.colors.mint : theme.colors.bgSecondary,
+              position: 'relative', transition: 'background 0.2s',
+            }}
+          >
+            <div style={{
+              width: 16, height: 16, borderRadius: 8, background: '#fff',
+              position: 'absolute', top: 2, transition: 'left 0.2s',
+              left: plan.active ? 18 : 2,
+            }} />
+          </button>
+          <button
+            onClick={onDelete}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: theme.colors.danger, fontSize: 16, padding: '2px 4px',
+              lineHeight: 1,
+            }}
+            title="Excluir plano"
+          >
+            &#10005;
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: '14px 14px 20px', display: 'flex', flexDirection: 'column', gap: 14, flex: 1 }}>
+        {/* Featured button */}
+        <button
+          onClick={onToggleFeatured}
+          style={{
+            padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+            border: plan.featured ? `2px solid ${theme.colors.warm}` : `1px solid ${theme.colors.border}`,
+            background: plan.featured ? theme.colors.warmMuted : 'transparent',
+            color: plan.featured ? theme.colors.warm : theme.colors.textMuted,
+            fontSize: 12, fontWeight: 600, textAlign: 'center',
+            transition: 'all 0.15s',
+          }}
+        >
+          {plan.featured ? '★ Mais escolhido' : '★ Marcar como mais escolhido'}
+        </button>
+
+        {/* Name + Type */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div>
+            <label className="eyebrow" style={{ display: 'block', marginBottom: 4, fontSize: 9.5 }}>Nome do Plano</label>
+            <input
+              value={plan.name}
+              onChange={e => onLocalUpdate({ name: e.target.value })}
+              style={{ ...inputStyle, width: '100%', fontSize: 12, fontWeight: 600, padding: '8px 10px' }}
+            />
+          </div>
+          <div>
+            <label className="eyebrow" style={{ display: 'block', marginBottom: 4, fontSize: 9.5 }}>Tipo</label>
+            <input
+              value={plan.type || 'Mensal (1 mes)'}
+              onChange={e => onLocalUpdate({ type: e.target.value })}
+              style={{ ...inputStyle, width: '100%', fontSize: 12, padding: '8px 10px' }}
+            />
+          </div>
+        </div>
+
+        {/* Price */}
+        <div>
+          <label className="eyebrow" style={{ display: 'block', marginBottom: 4, fontSize: 9.5 }}>Valor (R$ por mes)</label>
+          <input
+            type="number" step="0.01" min="0"
+            value={plan.price}
+            onChange={e => onLocalUpdate({ price: parseFloat(e.target.value) || 0 })}
+            style={{ ...inputStyle, width: '100%', fontSize: 18, fontWeight: 700, padding: '8px 10px', color: theme.colors.primary }}
+          />
+        </div>
+
+        {/* Advance payment discounts */}
+        <div>
+          <label className="eyebrow" style={{ display: 'block', marginBottom: 8, fontSize: 9.5 }}>
+            Desconto por antecipacao
+          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {[
+              { key: 'discount_3m', label: '3 meses', months: 3 },
+              { key: 'discount_6m', label: '6 meses', months: 6 },
+              { key: 'discount_12m', label: '12 meses', months: 12 },
+            ].map(tier => {
+              const discountPct = plan[tier.key] || 0
+              const pricePerMonth = plan.price * (1 - discountPct / 100)
+              const total = Math.round(pricePerMonth * tier.months * 100) / 100
+              return (
+                <div key={tier.key} style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 10px', borderRadius: 8,
+                  background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+                }}>
+                  <span style={{ fontSize: 11, color: theme.colors.textMuted, width: 55, flexShrink: 0 }}>{tier.label}</span>
+                  <input
+                    type="number" min="0" max="50" step="1"
+                    value={discountPct}
+                    onChange={e => onLocalUpdate({ [tier.key]: Math.max(0, Math.min(50, parseFloat(e.target.value) || 0)) })}
+                    style={{ ...inputStyle, width: 48, textAlign: 'center', fontSize: 13, fontWeight: 600, padding: '4px 6px' }}
+                  />
+                  <span style={{ fontSize: 12, color: theme.colors.textMuted, fontWeight: 600 }}>%</span>
+                  {discountPct > 0 && plan.price > 0 && (
+                    <span style={{ fontSize: 10, color: theme.colors.mint, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                      R${total.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Benefits */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <label className="eyebrow" style={{ fontSize: 9.5 }}>Beneficios</label>
+            <button
+              onClick={() => {
+                const text = prompt('Nome do beneficio:')
+                if (text?.trim()) {
+                  const benefits = [...(plan.benefits || []), { text: text.trim(), included: true }]
+                  onLocalUpdate({ benefits })
+                }
+              }}
+              style={{
+                ...btnSoft, padding: '3px 10px', fontSize: 10.5,
+              }}
+            >
+              + Adicionar
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {(plan.benefits || []).map((b, idx) => (
+              <div key={idx} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 8px', borderRadius: 6,
+                fontSize: 12, color: theme.colors.textSecondary,
+              }}
+                className="row-hover"
+              >
+                <button
+                  onClick={() => toggleBenefitIncluded(idx)}
+                  style={{
+                    width: 18, height: 18, borderRadius: 4, border: 'none', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 700, flexShrink: 0,
+                    background: b.included ? 'rgba(0,210,150,0.15)' : 'rgba(244,115,131,0.15)',
+                    color: b.included ? theme.colors.mint : theme.colors.danger,
+                  }}
+                >
+                  {b.included ? '✓' : '✕'}
+                </button>
+                <span style={{
+                  flex: 1, fontSize: 12,
+                  color: b.included ? theme.colors.textSecondary : theme.colors.textFaint,
+                  textDecoration: b.included ? 'none' : 'none',
+                }}>
+                  {b.text}
+                </span>
+                <button
+                  onClick={() => removeBenefit(idx)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: theme.colors.textFaint, fontSize: 13, padding: '2px',
+                    lineHeight: 1, opacity: 0.5,
+                  }}
+                >
+                  &#10005;
+                </button>
+              </div>
+            ))}
+            {(!plan.benefits || plan.benefits.length === 0) && (
+              <div style={{ fontSize: 11, color: theme.colors.textFaint, textAlign: 'center', padding: 10 }}>
+                Nenhum beneficio adicionado
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Save button */}
+        <button
+          onClick={() => onSave(plan)}
+          disabled={saving}
+          style={{
+            ...btnPrimary,
+            justifyContent: 'center', width: '100%',
+            marginTop: 'auto', padding: '10px 16px',
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          <Icon name="check" size={13} />
+          {saving ? 'Salvando...' : 'Salvar plano'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PlatformSettingsPanel() {
   const [settings, setSettings] = useState({})
   const [loading, setLoading] = useState(true)
@@ -448,8 +801,6 @@ function PlatformSettingsPanel() {
   const [mpToken, setMpToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [appUrl, setAppUrl] = useState('')
-  const [discounts, setDiscounts] = useState({ '3': 0, '6': 0, '12': 0 })
-
   useEffect(() => { loadSettings() }, [])
 
   async function loadSettings() {
@@ -458,10 +809,6 @@ function PlatformSettingsPanel() {
       setSettings(data)
       setMpToken(data.mp_access_token?.hasValue ? data.mp_access_token.value : '')
       setAppUrl(data.app_url?.value || 'https://reinonexusideal.com.br')
-      try {
-        const d = data.payment_discounts?.value ? JSON.parse(data.payment_discounts.value) : {}
-        setDiscounts({ '3': d['3'] || 0, '6': d['6'] || 0, '12': d['12'] || 0 })
-      } catch { setDiscounts({ '3': 0, '6': 0, '12': 0 }) }
     } catch (err) { console.error(err) } finally { setLoading(false) }
   }
 
@@ -474,7 +821,6 @@ function PlatformSettingsPanel() {
         updates.mp_access_token = mpToken
       }
       if (appUrl) updates.app_url = appUrl
-      updates.payment_discounts = JSON.stringify(discounts)
 
       await api.admin.updateSettings(updates)
       setSaved(true)
@@ -576,58 +922,11 @@ function PlatformSettingsPanel() {
         </div>
       </div>
 
-      {/* Discount tiers */}
-      <div style={{ ...panelStyle, padding: 24 }}>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: theme.colors.text }}>Descontos por antecipacao</div>
-          <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 4 }}>
-            Configure descontos para gestores que pagam varios meses adiantado. O desconto e aplicado sobre o valor mensal do plano.
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-          {[
-            { key: '3', label: 'Trimestral', desc: '3 meses' },
-            { key: '6', label: 'Semestral', desc: '6 meses' },
-            { key: '12', label: 'Anual', desc: '12 meses' },
-          ].map(tier => (
-            <div key={tier.key} style={{
-              padding: 16, borderRadius: 10,
-              background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.text, marginBottom: 2 }}>{tier.label}</div>
-              <div style={{ fontSize: 11, color: theme.colors.textFaint, marginBottom: 10 }}>{tier.desc}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input
-                  type="number"
-                  min="0" max="50" step="1"
-                  value={discounts[tier.key]}
-                  onChange={e => setDiscounts({ ...discounts, [tier.key]: Math.max(0, Math.min(50, parseInt(e.target.value) || 0)) })}
-                  style={{ ...inputStyle, width: 60, textAlign: 'center', fontSize: 16, fontWeight: 600, padding: '6px 8px' }}
-                />
-                <span style={{ fontSize: 16, fontWeight: 600, color: theme.colors.textMuted }}>%</span>
-              </div>
-              {discounts[tier.key] > 0 && (
-                <div style={{ fontSize: 11, color: theme.colors.mint, marginTop: 6 }}>
-                  R$97 → R${(97 * (1 - discounts[tier.key] / 100)).toFixed(0)}/mes
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }}
-          >
-            <Icon name="check" size={13} />
-            {saving ? 'Salvando...' : 'Salvar descontos'}
-          </button>
-          {saved && (
-            <span style={{ fontSize: 12, color: theme.colors.mint, fontWeight: 500 }}>Salvo!</span>
-          )}
+      {/* Info: discounts moved to plans */}
+      <div style={{ ...panelStyle, padding: 16, background: theme.colors.bgSecondary }}>
+        <div style={{ fontSize: 12, color: theme.colors.textMuted, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 16 }}>&#128161;</span>
+          <span>Os descontos por antecipacao agora sao configurados individualmente em cada plano na aba <strong style={{ color: theme.colors.primary }}>"Planos"</strong>.</span>
         </div>
       </div>
 
