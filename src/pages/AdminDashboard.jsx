@@ -448,6 +448,7 @@ function PlatformSettingsPanel() {
   const [mpToken, setMpToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [appUrl, setAppUrl] = useState('')
+  const [discounts, setDiscounts] = useState({ '3': 0, '6': 0, '12': 0 })
 
   useEffect(() => { loadSettings() }, [])
 
@@ -457,6 +458,10 @@ function PlatformSettingsPanel() {
       setSettings(data)
       setMpToken(data.mp_access_token?.hasValue ? data.mp_access_token.value : '')
       setAppUrl(data.app_url?.value || 'https://reinonexusideal.com.br')
+      try {
+        const d = data.payment_discounts?.value ? JSON.parse(data.payment_discounts.value) : {}
+        setDiscounts({ '3': d['3'] || 0, '6': d['6'] || 0, '12': d['12'] || 0 })
+      } catch { setDiscounts({ '3': 0, '6': 0, '12': 0 }) }
     } catch (err) { console.error(err) } finally { setLoading(false) }
   }
 
@@ -465,11 +470,11 @@ function PlatformSettingsPanel() {
     setSaved(false)
     try {
       const updates = {}
-      // Only send token if it's not the masked version
       if (mpToken && !/^\*+/.test(mpToken)) {
         updates.mp_access_token = mpToken
       }
       if (appUrl) updates.app_url = appUrl
+      updates.payment_discounts = JSON.stringify(discounts)
 
       await api.admin.updateSettings(updates)
       setSaved(true)
@@ -567,6 +572,61 @@ function PlatformSettingsPanel() {
             <span style={{ fontSize: 12, color: theme.colors.mint, fontWeight: 500 }}>
               Configuracoes salvas com sucesso!
             </span>
+          )}
+        </div>
+      </div>
+
+      {/* Discount tiers */}
+      <div style={{ ...panelStyle, padding: 24 }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: theme.colors.text }}>Descontos por antecipacao</div>
+          <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 4 }}>
+            Configure descontos para gestores que pagam varios meses adiantado. O desconto e aplicado sobre o valor mensal do plano.
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+          {[
+            { key: '3', label: 'Trimestral', desc: '3 meses' },
+            { key: '6', label: 'Semestral', desc: '6 meses' },
+            { key: '12', label: 'Anual', desc: '12 meses' },
+          ].map(tier => (
+            <div key={tier.key} style={{
+              padding: 16, borderRadius: 10,
+              background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.text, marginBottom: 2 }}>{tier.label}</div>
+              <div style={{ fontSize: 11, color: theme.colors.textFaint, marginBottom: 10 }}>{tier.desc}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="number"
+                  min="0" max="50" step="1"
+                  value={discounts[tier.key]}
+                  onChange={e => setDiscounts({ ...discounts, [tier.key]: Math.max(0, Math.min(50, parseInt(e.target.value) || 0)) })}
+                  style={{ ...inputStyle, width: 60, textAlign: 'center', fontSize: 16, fontWeight: 600, padding: '6px 8px' }}
+                />
+                <span style={{ fontSize: 16, fontWeight: 600, color: theme.colors.textMuted }}>%</span>
+              </div>
+              {discounts[tier.key] > 0 && (
+                <div style={{ fontSize: 11, color: theme.colors.mint, marginTop: 6 }}>
+                  R$97 → R${(97 * (1 - discounts[tier.key] / 100)).toFixed(0)}/mes
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ ...btnPrimary, opacity: saving ? 0.6 : 1 }}
+          >
+            <Icon name="check" size={13} />
+            {saving ? 'Salvando...' : 'Salvar descontos'}
+          </button>
+          {saved && (
+            <span style={{ fontSize: 12, color: theme.colors.mint, fontWeight: 500 }}>Salvo!</span>
           )}
         </div>
       </div>

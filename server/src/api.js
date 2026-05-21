@@ -2105,11 +2105,49 @@ router.get('/subscription', authMiddleware, (req, res) => {
 
 // ============ MERCADO PAGO PAYMENT ============
 
+// Helper: get discount config from platform_settings
+function getPaymentDiscounts() {
+  const row = get("SELECT value FROM platform_settings WHERE key = 'payment_discounts'")
+  try { return row?.value ? JSON.parse(row.value) : {} } catch { return {} }
+}
+
+// Get payment config (public for authenticated users)
+router.get('/payment/config', authMiddleware, (req, res) => {
+  const sub = get(
+    'SELECT s.*, p.name as plan_name, p.price as plan_price FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+    [req.user.company_id]
+  )
+  const discounts = getPaymentDiscounts()
+  const basePrice = sub?.plan_price || 97
+
+  // Build pricing tiers
+  const tiers = [1, 3, 6, 12].map(months => {
+    const discountPct = months === 1 ? 0 : (discounts[String(months)] || 0)
+    const pricePerMonth = basePrice * (1 - discountPct / 100)
+    const total = Math.round(pricePerMonth * months * 100) / 100
+    const savings = Math.round((basePrice * months - total) * 100) / 100
+    return { months, discountPct, pricePerMonth: Math.round(pricePerMonth * 100) / 100, total, savings }
+  })
+
+  res.json({
+    subscription: sub || { status: 'none' },
+    basePrice,
+    tiers,
+    mpConfigured: !!getMPClient(),
+  })
+})
+
 // Create checkout preference for subscription payment
 router.post('/payment/create-preference', authMiddleware, async (req, res) => {
   try {
     const client = getMPClient()
     if (!client) return res.status(500).json({ error: 'Mercado Pago não configurado. Entre em contato com o suporte.' })
+
+    const { months = 1 } = req.body
+    const validMonths = [1, 3, 6, 12]
+    if (!validMonths.includes(months)) {
+      return res.status(400).json({ error: 'Período inválido' })
+    }
 
     const user = get('SELECT * FROM users WHERE id = ?', [req.user.id])
     const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
@@ -2120,20 +2158,29 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
 
     if (!sub) return res.status(400).json({ error: 'Nenhuma assinatura encontrada' })
 
+    // Calculate price with discount
+    const discounts = getPaymentDiscounts()
+    const basePrice = sub.plan_price || 97
+    const discountPct = months === 1 ? 0 : (discounts[String(months)] || 0)
+    const pricePerMonth = basePrice * (1 - discountPct / 100)
+    const totalPrice = Math.round(pricePerMonth * months * 100) / 100
+
     const basePath = process.env.BASE_PATH || '/audiovisual'
     const appUrlRow = get("SELECT value FROM platform_settings WHERE key = 'app_url'")
     const baseUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
+
+    const periodLabel = months === 1 ? 'Mensal' : `${months} meses`
 
     const preference = new Preference(client)
     const result = await preference.create({
       body: {
         items: [
           {
-            id: `nexus-sub-${sub.plan_id}`,
-            title: `Nexus Audiovisual - ${sub.plan_name || 'Profissional'}`,
-            description: `Assinatura mensal - ${company.name}`,
+            id: `nexus-sub-${sub.plan_id}-${months}m`,
+            title: `Nexus Audiovisual - ${sub.plan_name || 'Profissional'} (${periodLabel})`,
+            description: `${company.name} — ${months} ${months === 1 ? 'mes' : 'meses'} de assinatura`,
             quantity: 1,
-            unit_price: sub.plan_price || 97,
+            unit_price: totalPrice,
             currency_id: 'BRL',
           }
         ],
@@ -2145,6 +2192,8 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
           company_id: req.user.company_id,
           subscription_id: sub.id,
           user_id: req.user.id,
+          months,
+          discount_pct: discountPct,
         }),
         back_urls: {
           success: `${baseUrl}${basePath}/#/settings?payment=success`,
@@ -2187,22 +2236,39 @@ router.post('/payment/webhook', async (req, res) => {
 
         const companyId = ref.company_id
         const subId = ref.subscription_id
+        const months = ref.months || 1
 
         if (companyId && subId) {
+          // Check for duplicate payment
+          const existing = get('SELECT id FROM subscription_payments WHERE mp_payment_id = ?', [String(data.id)])
+          if (existing) {
+            console.log(`[MP] Duplicate webhook for payment ${data.id}, skipping`)
+            return res.sendStatus(200)
+          }
+
           // Record payment
           run(
             'INSERT INTO subscription_payments (subscription_id, company_id, amount, status, payment_method, mp_payment_id, paid_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
             [subId, companyId, paymentData.transaction_amount, 'approved', 'mercadopago', String(data.id)]
           )
 
-          // Activate subscription for 30 days
-          const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          // Stack months: extend from current_period_end if active, or from now
+          const currentSub = get('SELECT * FROM subscriptions WHERE id = ?', [subId])
+          let startFrom = new Date()
+          if (currentSub && currentSub.status === 'active' && currentSub.current_period_end) {
+            const existingEnd = new Date(currentSub.current_period_end)
+            if (existingEnd > startFrom) startFrom = existingEnd
+          }
+
+          const newEnd = new Date(startFrom.getTime() + months * 30 * 24 * 60 * 60 * 1000).toISOString()
+          const periodStart = currentSub?.status === 'active' ? currentSub.current_period_start : new Date().toISOString()
+
           run(
             'UPDATE subscriptions SET status = ?, current_period_start = ?, current_period_end = ?, mp_payer_email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            ['active', new Date().toISOString(), end, paymentData.payer?.email || '', subId]
+            ['active', periodStart, newEnd, paymentData.payer?.email || '', subId]
           )
 
-          console.log(`[MP] Payment approved for company ${companyId}: R$${paymentData.transaction_amount}`)
+          console.log(`[MP] Payment approved for company ${companyId}: R$${paymentData.transaction_amount} (+${months} months, until ${newEnd})`)
         }
       }
     }
@@ -2210,7 +2276,7 @@ router.post('/payment/webhook', async (req, res) => {
     res.sendStatus(200)
   } catch (err) {
     console.error('MP webhook error:', err)
-    res.sendStatus(200) // Always return 200 to MP
+    res.sendStatus(200)
   }
 })
 
@@ -2231,10 +2297,13 @@ router.get('/payment/status', authMiddleware, (req, res) => {
     [req.user.company_id]
   )
 
+  const discounts = getPaymentDiscounts()
+
   res.json({
     subscription: sub || { status: 'none' },
     lastPayment,
     payments,
+    discounts,
     mpConfigured: !!getMPClient(),
   })
 })

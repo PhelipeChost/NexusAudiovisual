@@ -165,7 +165,8 @@ const api = {
   },
 
   payment: {
-    createPreference: () => request('/payment/create-preference', { method: 'POST' }),
+    config: () => request('/payment/config'),
+    createPreference: (months) => request('/payment/create-preference', { method: 'POST', body: JSON.stringify({ months }) }),
     status: () => request('/payment/status'),
   },
 

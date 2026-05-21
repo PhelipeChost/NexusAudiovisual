@@ -156,32 +156,33 @@ function WorkspaceSettings() {
 }
 
 function SubscriptionSettings() {
+  const [config, setConfig] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [paying, setPaying] = useState(false)
   const [paymentMsg, setPaymentMsg] = useState('')
+  const [selectedMonths, setSelectedMonths] = useState(1)
 
   useEffect(() => {
-    loadStatus()
-    // Check URL for payment result
+    loadAll()
     const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
-    if (params.get('payment') === 'success') {
-      setPaymentMsg('Pagamento aprovado! Sua assinatura foi ativada.')
-      // Clean URL
+    const paymentResult = params.get('payment')
+    if (paymentResult) {
+      const msgs = {
+        success: 'Pagamento aprovado! Sua assinatura foi ativada.',
+        failure: 'Pagamento nao concluido. Tente novamente.',
+        pending: 'Pagamento pendente. Aguarde a confirmacao.',
+      }
+      setPaymentMsg(msgs[paymentResult] || '')
       window.history.replaceState(null, '', window.location.pathname + window.location.hash.split('?')[0])
-      setTimeout(() => loadStatus(), 2000)
-    } else if (params.get('payment') === 'failure') {
-      setPaymentMsg('Pagamento nao foi concluido. Tente novamente.')
-      window.history.replaceState(null, '', window.location.pathname + window.location.hash.split('?')[0])
-    } else if (params.get('payment') === 'pending') {
-      setPaymentMsg('Pagamento pendente. Aguarde a confirmacao.')
-      window.history.replaceState(null, '', window.location.pathname + window.location.hash.split('?')[0])
+      if (paymentResult === 'success') setTimeout(() => loadAll(), 2000)
     }
   }, [])
 
-  async function loadStatus() {
+  async function loadAll() {
     try {
-      const d = await api.payment.status()
+      const [c, d] = await Promise.all([api.payment.config(), api.payment.status()])
+      setConfig(c)
       setData(d)
     } catch (err) { console.error(err) } finally { setLoading(false) }
   }
@@ -190,7 +191,7 @@ function SubscriptionSettings() {
     setPaying(true)
     setPaymentMsg('')
     try {
-      const pref = await api.payment.createPreference()
+      const pref = await api.payment.createPreference(selectedMonths)
       if (pref.init_point) {
         window.location.href = pref.init_point
       } else {
@@ -203,13 +204,30 @@ function SubscriptionSettings() {
 
   if (loading) return <Spinner />
 
-  const sub = data?.subscription || {}
+  const sub = config?.subscription || data?.subscription || {}
   const isActive = sub.status === 'active'
   const isTrial = sub.status === 'trial'
-  const trialDays = isTrial && sub.trial_ends_at
-    ? Math.max(0, Math.ceil((new Date(sub.trial_ends_at) - Date.now()) / 86400000))
-    : null
-  const periodEnd = sub.current_period_end ? new Date(sub.current_period_end).toLocaleDateString('pt-BR') : null
+  const isExpired = ['past_due', 'cancelled', 'suspended'].includes(sub.status)
+  const tiers = config?.tiers || []
+  const selectedTier = tiers.find(t => t.months === selectedMonths) || tiers[0]
+
+  // Days remaining calculation
+  let daysRemaining = 0
+  let totalDays = 30
+  let endDate = null
+  if (isActive && sub.current_period_end) {
+    endDate = new Date(sub.current_period_end)
+    daysRemaining = Math.max(0, Math.ceil((endDate - Date.now()) / 86400000))
+    if (sub.current_period_start) {
+      totalDays = Math.max(1, Math.ceil((endDate - new Date(sub.current_period_start)) / 86400000))
+    }
+  } else if (isTrial && sub.trial_ends_at) {
+    endDate = new Date(sub.trial_ends_at)
+    daysRemaining = Math.max(0, Math.ceil((endDate - Date.now()) / 86400000))
+    totalDays = 7
+  }
+  const progressPct = Math.min(100, Math.max(0, ((totalDays - daysRemaining) / totalDays) * 100))
+  const progressColor = daysRemaining > 15 ? theme.colors.mint : daysRemaining > 5 ? theme.colors.warm : theme.colors.danger
 
   const STATUS_MAP = {
     trial: { label: 'Trial', color: theme.colors.warm, bg: theme.colors.warmMuted },
@@ -232,105 +250,224 @@ function SubscriptionSettings() {
       {paymentMsg && (
         <div style={{
           padding: '12px 16px', borderRadius: 10,
-          background: paymentMsg.includes('aprovado') || paymentMsg.includes('ativada')
-            ? 'rgba(0,210,150,0.12)' : paymentMsg.includes('pendente')
-            ? theme.colors.warmMuted : theme.colors.dangerMuted,
-          border: `1px solid ${paymentMsg.includes('aprovado') || paymentMsg.includes('ativada')
-            ? 'rgba(0,210,150,0.3)' : paymentMsg.includes('pendente')
-            ? 'rgba(255,138,107,0.3)' : 'rgba(244,115,131,0.3)'}`,
-          color: paymentMsg.includes('aprovado') || paymentMsg.includes('ativada')
-            ? theme.colors.mint : paymentMsg.includes('pendente')
-            ? theme.colors.warm : theme.colors.danger,
+          background: paymentMsg.includes('aprovado') ? 'rgba(0,210,150,0.12)' : paymentMsg.includes('pendente') ? theme.colors.warmMuted : theme.colors.dangerMuted,
+          border: `1px solid ${paymentMsg.includes('aprovado') ? 'rgba(0,210,150,0.3)' : paymentMsg.includes('pendente') ? 'rgba(255,138,107,0.3)' : 'rgba(244,115,131,0.3)'}`,
+          color: paymentMsg.includes('aprovado') ? theme.colors.mint : paymentMsg.includes('pendente') ? theme.colors.warm : theme.colors.danger,
           fontSize: 13, fontWeight: 500,
         }}>
           {paymentMsg}
         </div>
       )}
 
-      {/* Current plan */}
+      {/* Status card with progress */}
       <div style={{ ...panelStyle, padding: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
           <div>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Seu plano</div>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Seu plano</div>
             <div className="display" style={{ fontSize: 24, color: theme.colors.text }}>{sub.plan_name || 'Profissional'}</div>
           </div>
           <span style={{
             padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-            background: st.bg, color: st.color,
-            fontFamily: theme.fonts?.mono, textTransform: 'uppercase', letterSpacing: '0.05em',
+            background: st.bg, color: st.color, textTransform: 'uppercase', letterSpacing: '0.05em',
           }}>
             {st.label}
           </span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14, marginBottom: 20 }}>
+        {/* Progress bar */}
+        {(isActive || isTrial) && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, color: theme.colors.textSecondary }}>
+                {isActive ? 'Pago ate' : 'Trial ate'}{' '}
+                <strong style={{ color: theme.colors.text }}>{endDate?.toLocaleDateString('pt-BR')}</strong>
+              </span>
+              <span className="mono tnum" style={{ fontSize: 22, fontWeight: 700, color: progressColor }}>
+                {daysRemaining} <span style={{ fontSize: 12, fontWeight: 400, color: theme.colors.textMuted }}>dias restantes</span>
+              </span>
+            </div>
+            <div style={{
+              height: 6, borderRadius: 3, background: theme.colors.bgSecondary,
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%', borderRadius: 3,
+                width: `${progressPct}%`,
+                background: progressColor,
+                transition: 'width 0.5s ease',
+              }} />
+            </div>
+          </div>
+        )}
+
+        {isExpired && (
+          <div style={{
+            padding: '14px 16px', borderRadius: 10, marginBottom: 20,
+            background: theme.colors.dangerMuted, border: '1px solid rgba(244,115,131,0.3)',
+            color: theme.colors.danger, fontSize: 13, fontWeight: 500,
+          }}>
+            Sua assinatura expirou. Renove para continuar usando a plataforma.
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ padding: 14, background: theme.colors.bg, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
             <div className="eyebrow" style={{ marginBottom: 6 }}>Valor mensal</div>
             <div className="display tnum" style={{ fontSize: 22, color: theme.colors.primary }}>
-              R${(sub.plan_price || 97).toFixed(0)}
+              R${(config?.basePrice || 97).toFixed(0)}<span style={{ fontSize: 13, color: theme.colors.textMuted }}>/mes</span>
             </div>
           </div>
           <div style={{ padding: 14, background: theme.colors.bg, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
-            <div className="eyebrow" style={{ marginBottom: 6 }}>
-              {isTrial ? 'Trial expira em' : 'Proximo vencimento'}
-            </div>
-            <div className="display tnum" style={{ fontSize: 16, color: theme.colors.text }}>
-              {isTrial && trialDays !== null ? `${trialDays} dias` : periodEnd || '---'}
-            </div>
-          </div>
-          <div style={{ padding: 14, background: theme.colors.bg, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
-            <div className="eyebrow" style={{ marginBottom: 6 }}>Metodo</div>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Metodo de pagamento</div>
             <div style={{ fontSize: 14, color: theme.colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Icon name="financial" size={14} color={theme.colors.primary} />
               Mercado Pago
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Pay button */}
-        {!isActive && data?.mpConfigured && (
-          <button
-            onClick={handlePay}
-            disabled={paying}
-            style={{
-              ...btnPrimary,
-              justifyContent: 'center', width: '100%',
-              padding: '14px 20px', fontSize: 15,
-              background: '#009ee3',
-              opacity: paying ? 0.6 : 1,
-              cursor: paying ? 'wait' : 'pointer',
-            }}
-            onMouseOver={e => { if (!paying) e.target.style.background = '#0077b5' }}
-            onMouseOut={e => e.target.style.background = '#009ee3'}
-          >
-            {paying ? 'Redirecionando...' : `Pagar R$${(sub.plan_price || 97).toFixed(0)} via Mercado Pago`}
-          </button>
-        )}
-
-        {isActive && (
-          <div style={{
-            padding: '12px 16px', borderRadius: 10,
-            background: 'rgba(0,210,150,0.08)',
-            border: '1px solid rgba(0,210,150,0.2)',
-            color: theme.colors.mint, fontSize: 13, fontWeight: 500,
-            display: 'flex', alignItems: 'center', gap: 8,
-          }}>
-            <Icon name="check" size={14} />
-            Sua assinatura esta ativa ate {periodEnd}.
+      {/* Payment selection */}
+      {config?.mpConfigured && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>
+            {isActive ? 'Antecipar pagamento' : 'Escolha o periodo'}
           </div>
-        )}
+          {isActive && (
+            <p style={{ fontSize: 12.5, color: theme.colors.textMuted, marginBottom: 14, marginTop: -4 }}>
+              Meses pagos antecipadamente sao adicionados ao seu periodo atual.
+            </p>
+          )}
 
-        {!data?.mpConfigured && !isActive && (
-          <div style={{
-            padding: '12px 16px', borderRadius: 10,
-            background: theme.colors.warmMuted,
-            border: '1px solid rgba(255,138,107,0.3)',
-            color: theme.colors.warm, fontSize: 13,
-          }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+            {tiers.map(tier => {
+              const isSelected = selectedMonths === tier.months
+              const isBestValue = tier.months === 12
+              return (
+                <button
+                  key={tier.months}
+                  onClick={() => setSelectedMonths(tier.months)}
+                  style={{
+                    position: 'relative',
+                    padding: '18px 14px 14px',
+                    borderRadius: 12,
+                    border: `2px solid ${isSelected ? theme.colors.primary : theme.colors.border}`,
+                    background: isSelected ? theme.colors.primaryMuted : 'transparent',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    transition: 'all 0.15s',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {isBestValue && (
+                    <div style={{
+                      position: 'absolute', top: 0, left: 0, right: 0,
+                      padding: '2px 0', fontSize: 9, fontWeight: 700,
+                      background: theme.colors.mint, color: theme.colors.bg,
+                      textTransform: 'uppercase', letterSpacing: '0.08em',
+                    }}>
+                      Melhor valor
+                    </div>
+                  )}
+                  <div className="display" style={{
+                    fontSize: 28, color: isSelected ? theme.colors.primary : theme.colors.text,
+                    lineHeight: 1, marginBottom: 4, marginTop: isBestValue ? 4 : 0,
+                  }}>
+                    {tier.months}
+                  </div>
+                  <div style={{ fontSize: 11, color: theme.colors.textMuted, marginBottom: 8 }}>
+                    {tier.months === 1 ? 'mes' : 'meses'}
+                  </div>
+                  <div className="mono tnum" style={{
+                    fontSize: 15, fontWeight: 600,
+                    color: isSelected ? theme.colors.text : theme.colors.textSecondary,
+                  }}>
+                    R${tier.total.toFixed(0)}
+                  </div>
+                  {tier.discountPct > 0 && (
+                    <div style={{
+                      marginTop: 6, padding: '2px 8px', borderRadius: 4,
+                      background: 'rgba(0,210,150,0.12)',
+                      color: theme.colors.mint, fontSize: 10, fontWeight: 600,
+                      display: 'inline-block',
+                    }}>
+                      -{tier.discountPct}%
+                    </div>
+                  )}
+                  {tier.discountPct > 0 && (
+                    <div style={{ fontSize: 10, color: theme.colors.textFaint, marginTop: 4 }}>
+                      R${tier.pricePerMonth.toFixed(0)}/mes
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Summary + pay button */}
+          {selectedTier && (
+            <div style={{
+              ...panelStyle, padding: 20,
+              border: `1px solid ${theme.colors.primary}33`,
+              background: `${theme.colors.primaryMuted}`,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 14, color: theme.colors.text, fontWeight: 500 }}>
+                    {selectedTier.months === 1 ? '1 mes' : `${selectedTier.months} meses`} de Nexus {sub.plan_name || 'Profissional'}
+                  </div>
+                  {selectedTier.savings > 0 && (
+                    <div style={{ fontSize: 12, color: theme.colors.mint, marginTop: 2 }}>
+                      Economia de R${selectedTier.savings.toFixed(0)} ({selectedTier.discountPct}% off)
+                    </div>
+                  )}
+                  {isActive && (
+                    <div style={{ fontSize: 11.5, color: theme.colors.textMuted, marginTop: 4 }}>
+                      Novo vencimento: {new Date(
+                        (endDate || new Date()).getTime() + selectedTier.months * 30 * 86400000
+                      ).toLocaleDateString('pt-BR')}
+                    </div>
+                  )}
+                </div>
+                <div className="display tnum" style={{ fontSize: 28, color: theme.colors.primary }}>
+                  R${selectedTier.total.toFixed(0)}
+                </div>
+              </div>
+
+              <button
+                onClick={handlePay}
+                disabled={paying}
+                style={{
+                  ...btnPrimary,
+                  justifyContent: 'center', width: '100%',
+                  padding: '14px 20px', fontSize: 15,
+                  background: '#009ee3',
+                  opacity: paying ? 0.6 : 1,
+                  cursor: paying ? 'wait' : 'pointer',
+                }}
+                onMouseOver={e => { if (!paying) e.target.style.background = '#0077b5' }}
+                onMouseOut={e => e.target.style.background = '#009ee3'}
+              >
+                {paying ? 'Redirecionando ao Mercado Pago...' : isActive
+                  ? `Antecipar R$${selectedTier.total.toFixed(0)} via Mercado Pago`
+                  : `Pagar R$${selectedTier.total.toFixed(0)} via Mercado Pago`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!config?.mpConfigured && (
+        <div style={{
+          ...panelStyle, padding: 20,
+          background: theme.colors.warmMuted,
+          border: '1px solid rgba(255,138,107,0.3)',
+        }}>
+          <div style={{ color: theme.colors.warm, fontSize: 13 }}>
             Pagamento via Mercado Pago sera ativado em breve. Entre em contato com o suporte.
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Payment history */}
       {data?.payments?.length > 0 && (
