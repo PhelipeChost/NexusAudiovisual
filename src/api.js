@@ -154,6 +154,7 @@ const api = {
     updateSubscription: (companyId, data) => request(`/admin/subscriptions/${companyId}`, { method: 'PUT', body: JSON.stringify(data) }),
     recordPayment: (data) => request('/admin/payments', { method: 'POST', body: JSON.stringify(data) }),
     deletePayment: (id) => request(`/admin/payments/${id}`, { method: 'DELETE' }),
+    approvePayment: (id) => request(`/admin/payments/${id}/approve`, { method: 'PUT' }),
     plans: () => request('/admin/plans'),
     createPlan: (data) => request('/admin/plans', { method: 'POST', body: JSON.stringify(data) }),
     updatePlan: (id, data) => request(`/admin/plans/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -170,6 +171,7 @@ const api = {
   payment: {
     config: () => request('/payment/config'),
     createPreference: (months) => request('/payment/create-preference', { method: 'POST', body: JSON.stringify({ months }) }),
+    pix: (months) => request('/payment/pix', { method: 'POST', body: JSON.stringify({ months }) }),
     status: () => request('/payment/status'),
   },
 

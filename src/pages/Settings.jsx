@@ -166,6 +166,8 @@ function SubscriptionSettings() {
   const [paying, setPaying] = useState(false)
   const [paymentMsg, setPaymentMsg] = useState('')
   const [selectedMonths, setSelectedMonths] = useState(1)
+  const [payMethod, setPayMethod] = useState('mercadopago') // 'mercadopago' or 'pix'
+  const [pixCopied, setPixCopied] = useState(false)
 
   useEffect(() => {
     loadAll()
@@ -188,6 +190,9 @@ function SubscriptionSettings() {
       const [c, d] = await Promise.all([api.payment.config(), api.payment.status()])
       setConfig(c)
       setData(d)
+      // Auto-select available payment method
+      if (!c.mpConfigured && c.pixConfigured) setPayMethod('pix')
+      else if (c.mpConfigured && !c.pixConfigured) setPayMethod('mercadopago')
     } catch (err) { console.error(err) } finally { setLoading(false) }
   }
 
@@ -334,17 +339,30 @@ function SubscriptionSettings() {
             </div>
           </div>
           <div style={{ padding: 14, background: theme.colors.bg, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
-            <div className="eyebrow" style={{ marginBottom: 6 }}>Metodo de pagamento</div>
-            <div style={{ fontSize: 14, color: theme.colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="financial" size={14} color={theme.colors.primary} />
-              Mercado Pago
+            <div className="eyebrow" style={{ marginBottom: 6 }}>Metodos de pagamento</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {config?.mpConfigured && (
+                <div style={{ fontSize: 13, color: theme.colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: '#009ee3' }}>MP</span>
+                  Mercado Pago
+                </div>
+              )}
+              {config?.pixConfigured && (
+                <div style={{ fontSize: 13, color: theme.colors.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: '#32BCAD' }}>PIX</span>
+                  PIX
+                </div>
+              )}
+              {!config?.mpConfigured && !config?.pixConfigured && (
+                <div style={{ fontSize: 13, color: theme.colors.textMuted }}>Nenhum configurado</div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {/* Payment selection */}
-      {config?.mpConfigured && (
+      {(config?.mpConfigured || config?.pixConfigured) && (
         <div>
           <div className="eyebrow" style={{ marginBottom: 12 }}>
             {isActive ? 'Antecipar pagamento' : isPending ? 'Ative sua conta' : 'Escolha o periodo'}
@@ -425,8 +443,57 @@ function SubscriptionSettings() {
             })}
           </div>
 
+          {/* Payment method selector */}
+          {config?.mpConfigured && config?.pixConfigured && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>Metodo de pagamento</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => setPayMethod('mercadopago')}
+                  style={{
+                    flex: 1, padding: '12px 16px', borderRadius: 10,
+                    border: `2px solid ${payMethod === 'mercadopago' ? '#009ee3' : theme.colors.border}`,
+                    background: payMethod === 'mercadopago' ? 'rgba(0, 158, 227, 0.08)' : 'transparent',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    background: '#009ee3', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, fontWeight: 800, color: '#fff', flexShrink: 0,
+                  }}>MP</div>
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: payMethod === 'mercadopago' ? theme.colors.text : theme.colors.textSecondary }}>Mercado Pago</div>
+                    <div style={{ fontSize: 10.5, color: theme.colors.textMuted }}>Cartao, boleto, saldo MP</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setPayMethod('pix')}
+                  style={{
+                    flex: 1, padding: '12px 16px', borderRadius: 10,
+                    border: `2px solid ${payMethod === 'pix' ? '#32BCAD' : theme.colors.border}`,
+                    background: payMethod === 'pix' ? 'rgba(50, 188, 173, 0.08)' : 'transparent',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    background: '#32BCAD', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 800, color: '#fff', flexShrink: 0,
+                  }}>PIX</div>
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: payMethod === 'pix' ? theme.colors.text : theme.colors.textSecondary }}>PIX</div>
+                    <div style={{ fontSize: 10.5, color: theme.colors.textMuted }}>Transferencia instantanea</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Summary + pay button */}
-          {selectedTier && (
+          {selectedTier && payMethod === 'mercadopago' && config?.mpConfigured && (
             <div style={{
               ...panelStyle, padding: 20,
               border: `1px solid ${theme.colors.primary}33`,
@@ -477,17 +544,124 @@ function SubscriptionSettings() {
               </button>
             </div>
           )}
+
+          {/* PIX payment flow */}
+          {selectedTier && (payMethod === 'pix' || (!config?.mpConfigured && config?.pixConfigured)) && config?.pixConfigured && (
+            <div style={{
+              ...panelStyle, padding: 20,
+              border: '1px solid rgba(50, 188, 173, 0.3)',
+              background: 'rgba(50, 188, 173, 0.06)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 14, color: theme.colors.text, fontWeight: 500 }}>
+                    {selectedTier.months === 1 ? '1 mes' : `${selectedTier.months} meses`} de Nexus {sub.plan_name || 'Profissional'}
+                  </div>
+                  {selectedTier.savings > 0 && (
+                    <div style={{ fontSize: 12, color: theme.colors.mint, marginTop: 2 }}>
+                      Economia de R${selectedTier.savings.toFixed(0)} ({selectedTier.discountPct}% off)
+                    </div>
+                  )}
+                </div>
+                <div className="display tnum" style={{ fontSize: 28, color: '#32BCAD' }}>
+                  R${selectedTier.total.toFixed(2).replace('.', ',')}
+                </div>
+              </div>
+
+              {/* PIX key display */}
+              <div style={{
+                padding: 16, borderRadius: 10,
+                background: theme.colors.bg,
+                border: `1px solid ${theme.colors.border}`,
+                marginBottom: 14,
+              }}>
+                <div className="eyebrow" style={{ marginBottom: 8, color: '#32BCAD' }}>Chave PIX ({config.pixType?.toUpperCase() || 'CPF'})</div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <code style={{
+                    flex: 1, fontSize: 15, fontWeight: 600, color: theme.colors.text,
+                    fontFamily: theme.fonts.mono, wordBreak: 'break-all',
+                  }}>
+                    {config.pixKey}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(config.pixKey)
+                      setPixCopied(true)
+                      setTimeout(() => setPixCopied(false), 2000)
+                    }}
+                    style={{
+                      ...btnSoft,
+                      padding: '6px 14px', fontSize: 12,
+                      color: pixCopied ? theme.colors.mint : theme.colors.primary,
+                      borderColor: pixCopied ? 'rgba(0,210,150,0.3)' : undefined,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {pixCopied ? '✓ Copiada!' : 'Copiar'}
+                  </button>
+                </div>
+                {config.pixHolder && (
+                  <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 8 }}>
+                    Titular: <strong style={{ color: theme.colors.textSecondary }}>{config.pixHolder}</strong>
+                  </div>
+                )}
+              </div>
+
+              <div style={{
+                padding: '10px 14px', borderRadius: 8,
+                background: theme.colors.bgSecondary,
+                fontSize: 12, color: theme.colors.textMuted, lineHeight: 1.6,
+                marginBottom: 14,
+              }}>
+                <strong style={{ color: theme.colors.text }}>Como pagar:</strong><br />
+                1. Copie a chave PIX acima<br />
+                2. Abra o app do seu banco e faca um PIX de <strong style={{ color: '#32BCAD' }}>R${selectedTier.total.toFixed(2).replace('.', ',')}</strong><br />
+                3. Apos realizar o pagamento, clique no botao abaixo<br />
+                4. Aguarde a confirmacao do administrador
+              </div>
+
+              <button
+                onClick={async () => {
+                  setPaying(true)
+                  setPaymentMsg('')
+                  try {
+                    const result = await api.payment.pix(selectedMonths)
+                    setPaymentMsg(result.message || 'Pagamento PIX registrado! Aguarde a confirmacao.')
+                    loadAll()
+                  } catch (err) {
+                    setPaymentMsg(err.message || 'Erro ao registrar pagamento')
+                  } finally { setPaying(false) }
+                }}
+                disabled={paying}
+                style={{
+                  ...btnPrimary,
+                  justifyContent: 'center', width: '100%',
+                  padding: '14px 20px', fontSize: 15,
+                  background: '#32BCAD',
+                  opacity: paying ? 0.6 : 1,
+                  cursor: paying ? 'wait' : 'pointer',
+                }}
+                onMouseOver={e => { if (!paying) e.target.style.background = '#2aa89a' }}
+                onMouseOut={e => e.target.style.background = '#32BCAD'}
+              >
+                {paying ? 'Registrando...' : `Ja realizei o PIX de R$${selectedTier.total.toFixed(2).replace('.', ',')}`}
+              </button>
+            </div>
+          )}
+
         </div>
       )}
 
-      {!config?.mpConfigured && (
+      {!config?.mpConfigured && !config?.pixConfigured && (
         <div style={{
           ...panelStyle, padding: 20,
           background: theme.colors.warmMuted,
           border: '1px solid rgba(255,138,107,0.3)',
         }}>
           <div style={{ color: theme.colors.warm, fontSize: 13 }}>
-            Pagamento via Mercado Pago sera ativado em breve. Entre em contato com o suporte.
+            Nenhum metodo de pagamento configurado. Entre em contato com o suporte.
           </div>
         </div>
       )}
@@ -515,16 +689,16 @@ function SubscriptionSettings() {
                       R${parseFloat(p.amount).toFixed(2)}
                     </td>
                     <td style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textMuted }}>
-                      {p.payment_method === 'mercadopago' ? 'Mercado Pago' : p.payment_method || 'manual'}
+                      {p.payment_method === 'mercadopago' ? 'Mercado Pago' : p.payment_method === 'pix' ? 'PIX' : p.payment_method || 'manual'}
                     </td>
                     <td style={{ padding: '10px 14px' }}>
                       <span style={{
                         padding: '2px 6px', borderRadius: 3, fontSize: 10, fontWeight: 600,
-                        background: p.status === 'approved' ? 'rgba(0,210,150,0.12)' : 'rgba(255,183,77,0.12)',
-                        color: p.status === 'approved' ? theme.colors.mint : theme.colors.warm,
+                        background: p.status === 'approved' ? 'rgba(0,210,150,0.12)' : p.status === 'pending' ? 'rgba(255,183,77,0.12)' : 'rgba(244,115,131,0.12)',
+                        color: p.status === 'approved' ? theme.colors.mint : p.status === 'pending' ? theme.colors.warm : theme.colors.danger,
                         textTransform: 'uppercase',
                       }}>
-                        {p.status === 'approved' ? 'pago' : p.status}
+                        {p.status === 'approved' ? 'pago' : p.status === 'pending' ? 'aguardando' : p.status}
                       </span>
                     </td>
                     <td className="mono tnum" style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textMuted }}>

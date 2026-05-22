@@ -114,7 +114,7 @@ export default function AdminDashboard() {
         {[
           { id: 'overview', label: 'Empresas' },
           { id: 'plans', label: 'Planos' },
-          { id: 'payments', label: 'Pagamentos' },
+          { id: 'payments', label: 'Pagamentos', badge: stats.pendingPixPayments || 0 },
           { id: 'settings', label: 'Configuracoes' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
@@ -122,8 +122,20 @@ export default function AdminDashboard() {
             color: tab === t.id ? theme.colors.text : theme.colors.textMuted,
             background: tab === t.id ? theme.colors.surfaceHover : 'transparent',
             fontWeight: tab === t.id ? 500 : 400, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6,
           }}>
             {t.label}
+            {t.badge > 0 && (
+              <span style={{
+                minWidth: 18, height: 18, borderRadius: 9,
+                background: theme.colors.warm, color: theme.colors.bg,
+                fontSize: 10, fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '0 5px',
+              }}>
+                {t.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -225,21 +237,44 @@ export default function AdminDashboard() {
                     <td className="mono tnum" style={{ padding: '12px 14px', fontSize: 13, color: theme.colors.mint, fontWeight: 500 }}>
                       {fmtBRL(p.amount)}
                     </td>
-                    <td style={{ padding: '12px 14px', fontSize: 12, color: theme.colors.textMuted }}>{p.payment_method}</td>
+                    <td style={{ padding: '12px 14px', fontSize: 12, color: theme.colors.textMuted }}>
+                      {p.payment_method === 'mercadopago' ? 'Mercado Pago' : p.payment_method === 'pix' ? 'PIX' : p.payment_method || 'manual'}
+                    </td>
                     <td style={{ padding: '12px 14px' }}>
                       <span style={{
                         padding: '2px 6px', borderRadius: 3, fontSize: 10, fontWeight: 600,
-                        background: p.status === 'approved' ? 'rgba(0,210,150,0.12)' : 'rgba(255,183,77,0.12)',
-                        color: p.status === 'approved' ? theme.colors.mint : theme.colors.warm,
+                        background: p.status === 'approved' ? 'rgba(0,210,150,0.12)' : p.status === 'pending' ? 'rgba(255,183,77,0.12)' : 'rgba(244,115,131,0.12)',
+                        color: p.status === 'approved' ? theme.colors.mint : p.status === 'pending' ? theme.colors.warm : theme.colors.danger,
                         fontFamily: theme.fonts.mono, textTransform: 'uppercase',
                       }}>
-                        {p.status === 'approved' ? 'pago' : p.status}
+                        {p.status === 'approved' ? 'pago' : p.status === 'pending' ? 'aguardando' : p.status}
                       </span>
                     </td>
                     <td className="mono tnum" style={{ padding: '12px 14px', fontSize: 12, color: theme.colors.textMuted }}>
                       {p.paid_at ? new Date(p.paid_at).toLocaleDateString('pt-BR') : '---'}
                     </td>
-                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                      {p.status === 'pending' && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Aprovar pagamento PIX de R$${parseFloat(p.amount).toFixed(2)} de ${p.company_name}?`)) return
+                            try {
+                              await api.admin.approvePayment(p.id)
+                              loadData()
+                            } catch (err) { alert(err.message) }
+                          }}
+                          style={{
+                            background: 'rgba(0,210,150,0.12)', border: `1px solid rgba(0,210,150,0.3)`,
+                            cursor: 'pointer',
+                            color: theme.colors.mint, fontSize: 11, fontWeight: 600,
+                            padding: '4px 10px',
+                            borderRadius: 4,
+                          }}
+                          title="Aprovar pagamento"
+                        >
+                          Aprovar
+                        </button>
+                      )}
                       <button
                         onClick={async () => {
                           if (!confirm('Excluir este registro de pagamento?')) return
@@ -857,6 +892,9 @@ function PlatformSettingsPanel() {
   const [mpToken, setMpToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [appUrl, setAppUrl] = useState('')
+  const [pixKey, setPixKey] = useState('')
+  const [pixHolder, setPixHolder] = useState('')
+  const [pixType, setPixType] = useState('cpf')
   useEffect(() => { loadSettings() }, [])
 
   async function loadSettings() {
@@ -865,6 +903,9 @@ function PlatformSettingsPanel() {
       setSettings(data)
       setMpToken(data.mp_access_token?.hasValue ? data.mp_access_token.value : '')
       setAppUrl(data.app_url?.value || 'https://reinonexusideal.com.br')
+      setPixKey(data.pix_key?.value || '')
+      setPixHolder(data.pix_holder?.value || '')
+      setPixType(data.pix_type?.value || 'cpf')
     } catch (err) { console.error(err) } finally { setLoading(false) }
   }
 
@@ -877,6 +918,9 @@ function PlatformSettingsPanel() {
         updates.mp_access_token = mpToken
       }
       if (appUrl) updates.app_url = appUrl
+      updates.pix_key = pixKey
+      updates.pix_holder = pixHolder
+      updates.pix_type = pixType
 
       await api.admin.updateSettings(updates)
       setSaved(true)
@@ -953,6 +997,74 @@ function PlatformSettingsPanel() {
             />
             <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 6 }}>
               URL base para redirecionamento apos pagamento e webhooks.
+            </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: theme.colors.border, margin: '20px 0' }} />
+
+        {/* PIX Settings */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 8,
+            background: '#32BCAD', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, fontWeight: 800, color: '#fff',
+          }}>PIX</div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: theme.colors.text }}>PIX</div>
+            <div style={{ fontSize: 12, color: theme.colors.textMuted }}>Pagamento direto via PIX com aprovacao manual</div>
+          </div>
+          {pixKey && (
+            <span style={{
+              marginLeft: 'auto',
+              padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+              background: 'rgba(0,210,150,0.12)', color: theme.colors.mint,
+              textTransform: 'uppercase', letterSpacing: '0.05em',
+            }}>
+              Configurado
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 12 }}>
+            <div>
+              <label className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>Tipo de chave</label>
+              <select
+                value={pixType}
+                onChange={e => setPixType(e.target.value)}
+                style={{ ...inputStyle, width: '100%', cursor: 'pointer' }}
+              >
+                <option value="cpf">CPF</option>
+                <option value="cnpj">CNPJ</option>
+                <option value="email">Email</option>
+                <option value="telefone">Telefone</option>
+                <option value="aleatoria">Aleatoria</option>
+              </select>
+            </div>
+            <div>
+              <label className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>Chave PIX</label>
+              <input
+                type="text"
+                value={pixKey}
+                onChange={e => setPixKey(e.target.value)}
+                placeholder={pixType === 'cpf' ? '000.000.000-00' : pixType === 'email' ? 'email@exemplo.com' : pixType === 'telefone' ? '+5511999999999' : 'Chave PIX'}
+                style={{ ...inputStyle, width: '100%', fontFamily: 'monospace', fontSize: 12 }}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>Nome do titular</label>
+            <input
+              type="text"
+              value={pixHolder}
+              onChange={e => setPixHolder(e.target.value)}
+              placeholder="Nome completo do titular da conta"
+              style={{ ...inputStyle, width: '100%', fontSize: 12 }}
+            />
+            <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 6 }}>
+              Nome que aparecera para o gestor na hora de realizar o PIX.
             </div>
           </div>
         </div>
