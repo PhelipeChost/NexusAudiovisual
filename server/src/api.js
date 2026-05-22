@@ -2332,14 +2332,36 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
 // Mercado Pago webhook (IPN notification)
 router.post('/payment/webhook', async (req, res) => {
   try {
-    const { type, data } = req.body
+    console.log('[MP-WEBHOOK] Received:', JSON.stringify(req.body))
 
-    if (type === 'payment') {
-      const client = getMPClient()
-      if (!client) return res.sendStatus(200)
+    const { type, data, action } = req.body
 
-      const payment = new MPPayment(client)
-      const paymentData = await payment.get({ id: data.id })
+    // Handle both IPN and webhook v2 formats
+    const paymentId = data?.id || req.body.id
+    const isPayment = type === 'payment' || action === 'payment.created' || action === 'payment.updated'
+
+    if (isPayment && paymentId) {
+      // Use REST API directly instead of SDK (SDK Payment API requires production homologation)
+      const tokenRow = get("SELECT value FROM platform_settings WHERE key = 'mp_access_token'")
+      const accessToken = tokenRow?.value || process.env.MP_ACCESS_TOKEN || ''
+      if (!accessToken) {
+        console.log('[MP-WEBHOOK] No access token configured, skipping')
+        return res.sendStatus(200)
+      }
+
+      console.log(`[MP-WEBHOOK] Fetching payment ${paymentId}...`)
+      const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      })
+
+      if (!mpRes.ok) {
+        const errText = await mpRes.text()
+        console.error(`[MP-WEBHOOK] Failed to fetch payment ${paymentId}: ${mpRes.status} ${errText}`)
+        return res.sendStatus(200)
+      }
+
+      const paymentData = await mpRes.json()
+      console.log(`[MP-WEBHOOK] Payment ${paymentId}: status=${paymentData.status}, amount=${paymentData.transaction_amount}, ref=${paymentData.external_reference}`)
 
       if (paymentData.status === 'approved') {
         let ref
@@ -2353,16 +2375,16 @@ router.post('/payment/webhook', async (req, res) => {
 
         if (companyId && subId) {
           // Check for duplicate payment
-          const existing = get('SELECT id FROM subscription_payments WHERE mp_payment_id = ?', [String(data.id)])
+          const existing = get('SELECT id FROM subscription_payments WHERE mp_payment_id = ?', [String(paymentId)])
           if (existing) {
-            console.log(`[MP] Duplicate webhook for payment ${data.id}, skipping`)
+            console.log(`[MP-WEBHOOK] Duplicate webhook for payment ${paymentId}, skipping`)
             return res.sendStatus(200)
           }
 
           // Record payment
           run(
             'INSERT INTO subscription_payments (subscription_id, company_id, amount, status, payment_method, mp_payment_id, paid_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
-            [subId, companyId, paymentData.transaction_amount, 'approved', 'mercadopago', String(data.id)]
+            [subId, companyId, paymentData.transaction_amount, 'approved', paymentData.payment_method_id || 'mercadopago', String(paymentId)]
           )
 
           // Stack months: extend from current_period_end if active, or from now
@@ -2381,14 +2403,18 @@ router.post('/payment/webhook', async (req, res) => {
             ['active', periodStart, newEnd, paymentData.payer?.email || '', subId]
           )
 
-          console.log(`[MP] Payment approved for company ${companyId}: R$${paymentData.transaction_amount} (+${months} months, until ${newEnd})`)
+          console.log(`[MP-WEBHOOK] Payment approved for company ${companyId}: R$${paymentData.transaction_amount} (+${months} months, until ${newEnd})`)
+        } else {
+          console.log(`[MP-WEBHOOK] Payment approved but missing ref data: companyId=${companyId}, subId=${subId}`)
         }
       }
+    } else {
+      console.log(`[MP-WEBHOOK] Ignoring event: type=${type}, action=${action}`)
     }
 
     res.sendStatus(200)
   } catch (err) {
-    console.error('MP webhook error:', err)
+    console.error('[MP-WEBHOOK] Error:', err)
     res.sendStatus(200)
   }
 })
