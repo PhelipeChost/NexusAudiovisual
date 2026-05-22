@@ -2481,9 +2481,10 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
             { id: 'credit_card' },
             { id: 'debit_card' },
             { id: 'ticket' },
-            { id: 'atm' },
+            { id: 'prepaid_card' },
+            { id: 'digital_currency' },
+            { id: 'digital_wallet' },
           ],
-          installments: 1,
         },
         external_reference: JSON.stringify({
           company_id: req.user.company_id,
