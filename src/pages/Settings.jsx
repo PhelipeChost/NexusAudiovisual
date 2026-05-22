@@ -19,7 +19,11 @@ const ALL_TABS = [
 export default function Settings() {
   const { user } = useAuth()
   const visibleTabs = ALL_TABS.filter(t => t.roles.includes(user?.role))
-  const [tab, setTab] = useState(visibleTabs[0]?.id || 'account')
+  // Auto-open subscription tab if payment query param present
+  const params = new URLSearchParams(window.location.search)
+  const hasPaymentParam = params.has('payment')
+  const defaultTab = hasPaymentParam ? 'subscription' : (visibleTabs[0]?.id || 'account')
+  const [tab, setTab] = useState(defaultTab)
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: visibleTabs.length > 1 ? '220px 1fr' : '1fr', gap: 32, maxWidth: 1100 }}>
@@ -207,6 +211,7 @@ function SubscriptionSettings() {
   const sub = config?.subscription || data?.subscription || {}
   const isActive = sub.status === 'active'
   const isTrial = sub.status === 'trial'
+  const isPending = sub.status === 'pending'
   const isExpired = ['past_due', 'cancelled', 'suspended'].includes(sub.status)
   const tiers = config?.tiers || []
   const selectedTier = tiers.find(t => t.months === selectedMonths) || tiers[0]
@@ -230,6 +235,7 @@ function SubscriptionSettings() {
   const progressColor = daysRemaining > 15 ? theme.colors.mint : daysRemaining > 5 ? theme.colors.warm : theme.colors.danger
 
   const STATUS_MAP = {
+    pending: { label: 'Aguardando Pagamento', color: theme.colors.warm, bg: theme.colors.warmMuted },
     trial: { label: 'Trial', color: theme.colors.warm, bg: theme.colors.warmMuted },
     active: { label: 'Ativo', color: theme.colors.mint, bg: 'rgba(0,210,150,0.12)' },
     past_due: { label: 'Vencido', color: theme.colors.danger, bg: theme.colors.dangerMuted },
@@ -300,6 +306,16 @@ function SubscriptionSettings() {
           </div>
         )}
 
+        {isPending && (
+          <div style={{
+            padding: '14px 16px', borderRadius: 10, marginBottom: 20,
+            background: theme.colors.warmMuted, border: '1px solid rgba(255,138,107,0.3)',
+            color: theme.colors.warm, fontSize: 13, fontWeight: 500,
+          }}>
+            Realize o pagamento abaixo para ativar sua conta e comecar a usar a plataforma.
+          </div>
+        )}
+
         {isExpired && (
           <div style={{
             padding: '14px 16px', borderRadius: 10, marginBottom: 20,
@@ -331,11 +347,16 @@ function SubscriptionSettings() {
       {config?.mpConfigured && (
         <div>
           <div className="eyebrow" style={{ marginBottom: 12 }}>
-            {isActive ? 'Antecipar pagamento' : 'Escolha o periodo'}
+            {isActive ? 'Antecipar pagamento' : isPending ? 'Ative sua conta' : 'Escolha o periodo'}
           </div>
           {isActive && (
             <p style={{ fontSize: 12.5, color: theme.colors.textMuted, marginBottom: 14, marginTop: -4 }}>
               Meses pagos antecipadamente sao adicionados ao seu periodo atual.
+            </p>
+          )}
+          {isPending && (
+            <p style={{ fontSize: 12.5, color: theme.colors.textMuted, marginBottom: 14, marginTop: -4 }}>
+              Escolha o periodo e realize o pagamento para liberar o acesso completo a plataforma.
             </p>
           )}
 
@@ -450,7 +471,9 @@ function SubscriptionSettings() {
               >
                 {paying ? 'Redirecionando ao Mercado Pago...' : isActive
                   ? `Antecipar R$${selectedTier.total.toFixed(0)} via Mercado Pago`
-                  : `Pagar R$${selectedTier.total.toFixed(0)} via Mercado Pago`}
+                  : isPending
+                    ? `Ativar conta — R$${selectedTier.total.toFixed(0)} via Mercado Pago`
+                    : `Pagar R$${selectedTier.total.toFixed(0)} via Mercado Pago`}
               </button>
             </div>
           )}

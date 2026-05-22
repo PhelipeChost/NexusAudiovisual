@@ -366,7 +366,7 @@ async function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_id INTEGER NOT NULL UNIQUE,
       plan_id INTEGER,
-      status TEXT DEFAULT 'trial' CHECK(status IN ('trial','active','past_due','cancelled','suspended')),
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending','trial','active','past_due','cancelled','suspended')),
       trial_ends_at DATETIME,
       current_period_start DATETIME,
       current_period_end DATETIME,
@@ -418,6 +418,35 @@ async function initDb() {
   try { db.run('ALTER TABLE plans ADD COLUMN discount_6m REAL DEFAULT 0') } catch {}
   try { db.run('ALTER TABLE plans ADD COLUMN discount_12m REAL DEFAULT 0') } catch {}
   try { db.run('ALTER TABLE plans ADD COLUMN position INTEGER DEFAULT 0') } catch {}
+
+  // Migrate subscriptions table to include 'pending' status
+  try {
+    // Test if 'pending' is allowed by inserting and rolling back
+    const testOk = db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='subscriptions'")
+    const tableSql = testOk[0]?.values[0]?.[0] || ''
+    if (tableSql && !tableSql.includes("'pending'")) {
+      // Recreate table with updated CHECK
+      db.run(`CREATE TABLE IF NOT EXISTS subscriptions_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL UNIQUE,
+        plan_id INTEGER,
+        status TEXT DEFAULT 'pending' CHECK(status IN ('pending','trial','active','past_due','cancelled','suspended')),
+        trial_ends_at DATETIME,
+        current_period_start DATETIME,
+        current_period_end DATETIME,
+        mp_subscription_id TEXT,
+        mp_payer_email TEXT,
+        cancelled_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (company_id) REFERENCES companies(id),
+        FOREIGN KEY (plan_id) REFERENCES plans(id)
+      )`)
+      db.run(`INSERT INTO subscriptions_new SELECT * FROM subscriptions`)
+      db.run(`DROP TABLE subscriptions`)
+      db.run(`ALTER TABLE subscriptions_new RENAME TO subscriptions`)
+    }
+  } catch (e) { console.log('Subscription migration note:', e.message) }
 
   // Seed default plan if none exists
   const planCount = db.exec("SELECT COUNT(*) FROM plans")[0]?.values[0][0] || 0

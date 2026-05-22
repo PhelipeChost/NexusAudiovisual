@@ -126,7 +126,7 @@ export default function LandingPage() {
                 Entrar
               </button>
               <button
-                onClick={() => navigate('/register')}
+                onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}
                 style={{
                   padding: '9px 22px', borderRadius: 8,
                   background: colors.primary,
@@ -137,7 +137,7 @@ export default function LandingPage() {
                 onMouseOver={e => e.target.style.background = colors.primaryHover}
                 onMouseOut={e => e.target.style.background = colors.primary}
               >
-                Comecar Gratis
+                Comecar Agora
               </button>
             </>
           )}
@@ -159,7 +159,7 @@ export default function LandingPage() {
           marginBottom: 24,
           border: `1px solid rgba(127, 219, 255, 0.15)`,
         }}>
-          7 dias gratis — sem cartao de credito
+          Plataforma completa para gestao audiovisual
         </div>
 
         <h1 style={{
@@ -209,7 +209,7 @@ export default function LandingPage() {
           ) : (
             <>
               <button
-                onClick={() => navigate('/register')}
+                onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}
                 style={{
                   padding: '14px 36px', borderRadius: 10,
                   background: colors.primary,
@@ -221,7 +221,7 @@ export default function LandingPage() {
                 onMouseOver={e => { e.target.style.background = colors.primaryHover; e.target.style.transform = 'translateY(-2px)' }}
                 onMouseOut={e => { e.target.style.background = colors.primary; e.target.style.transform = 'none' }}
               >
-                Comecar Agora
+                Ver Planos
               </button>
               <button
                 onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
@@ -308,7 +308,7 @@ export default function LandingPage() {
           {plans.length > 1 ? 'Escolha o plano ideal' : 'Preco simples e transparente'}
         </h2>
         <p style={{ color: colors.textMuted, fontSize: 16, marginBottom: 40 }}>
-          {plans.length > 1 ? 'Planos para cada etapa do seu negocio. Comece gratis.' : 'Um unico plano com acesso completo. Comece gratis.'}
+          {plans.length > 1 ? 'Planos para cada etapa do seu negocio.' : 'Um unico plano com acesso completo.'}
         </p>
 
         <div style={{
@@ -362,7 +362,7 @@ export default function LandingPage() {
               onMouseOver={e => e.target.style.background = colors.primaryHover}
               onMouseOut={e => e.target.style.background = colors.primary}
             >
-              {user ? 'Acessar Painel' : 'Comecar 7 Dias Gratis'}
+              {user ? 'Acessar Painel' : 'Comecar Agora'}
             </button>
           </div>
         )}
@@ -381,7 +381,7 @@ export default function LandingPage() {
           Junte-se a gestores que ja simplificaram sua operacao com o Nexus.
         </p>
         <button
-          onClick={() => navigate(user ? dashPath : '/register')}
+          onClick={() => user ? navigate(dashPath) : document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}
           style={{
             padding: '14px 40px', borderRadius: 10,
             background: colors.primary,
@@ -393,7 +393,7 @@ export default function LandingPage() {
           onMouseOver={e => { e.target.style.background = colors.primaryHover; e.target.style.transform = 'translateY(-2px)' }}
           onMouseOut={e => { e.target.style.background = colors.primary; e.target.style.transform = 'none' }}
         >
-          {user ? 'Acessar Painel' : 'Criar Minha Conta Gratis'}
+          {user ? 'Acessar Painel' : 'Escolher meu plano'}
         </button>
       </section>
 
@@ -553,7 +553,7 @@ function PlanCard({ plan, navigate, user, dashPath }) {
       )}
 
       <button
-        onClick={() => navigate(user ? dashPath : '/register')}
+        onClick={() => navigate(user ? dashPath : `/register?plan=${plan.id}`)}
         style={{
           width: '100%',
           padding: '13px', borderRadius: 10,
@@ -565,11 +565,11 @@ function PlanCard({ plan, navigate, user, dashPath }) {
         onMouseOver={e => e.target.style.opacity = '0.85'}
         onMouseOut={e => e.target.style.opacity = '1'}
       >
-        {user ? 'Acessar Painel' : 'Comecar 7 Dias Gratis'}
+        {user ? 'Acessar Painel' : 'Escolher este plano'}
       </button>
 
       <p style={{ fontSize: 11, color: colors.textFaint, marginTop: 10, textAlign: 'center' }}>
-        Sem cartao de credito. Cancele quando quiser.
+        Cancele quando quiser.
       </p>
     </div>
   )

@@ -18,8 +18,7 @@ const ALL_NAV_ITEMS = [
   { path: '/dashboard/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
   { path: '/dashboard/calendar', label: 'Calendario', icon: 'calendar', roles: ['gestor'] },
   { path: '/dashboard/reports', label: 'Relatorios', icon: 'briefcase', roles: ['gestor'] },
-  { path: '/dashboard/admin', label: 'Administracao', icon: 'settings', roles: ['admin'] },
-  { path: '/dashboard/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente', 'admin'] },
+  { path: '/dashboard/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente'] },
 ]
 
 const PAGE_TITLES = {

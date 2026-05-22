@@ -33,11 +33,17 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [paymentRequired, setPaymentRequired] = useState(false)
 
   useEffect(() => {
     api.dashboard.get()
       .then(setData)
-      .catch(console.error)
+      .catch(err => {
+        if (err.message?.includes('pagamento') || err.message?.includes('ativar')) {
+          setPaymentRequired(true)
+        }
+        console.error(err)
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -49,6 +55,26 @@ export default function Dashboard() {
   const week = Math.ceil((((now - new Date(now.getFullYear(), 0, 1)) / 86400000) + 1) / 7)
 
   if (loading) return <Spinner />
+
+  if (paymentRequired) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 20, textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 8 }}>💳</div>
+        <h2 className="display" style={{ fontSize: 28, color: theme.colors.text, margin: 0 }}>Ative sua conta</h2>
+        <p style={{ fontSize: 14, color: theme.colors.textMuted, maxWidth: 400, lineHeight: 1.6 }}>
+          Para comecar a usar a plataforma, realize o pagamento do seu plano nas configuracoes.
+        </p>
+        <button
+          onClick={() => navigate('/dashboard/settings')}
+          style={{ ...btnPrimary, padding: '12px 32px', fontSize: 15, marginTop: 8 }}
+        >
+          <Icon name="financial" size={15} stroke />
+          Ir para Pagamento
+        </button>
+      </div>
+    )
+  }
+
   if (!data) return null
 
   const { stats, recentActivity, ordersByColumn, topClients, editorPerformance } = data

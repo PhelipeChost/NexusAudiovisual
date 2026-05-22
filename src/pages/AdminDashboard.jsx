@@ -9,6 +9,7 @@ import {
 } from '../components/ui'
 
 const SUB_STATUS = {
+  pending: { label: 'Aguardando pagamento', color: theme.colors.warm, bg: theme.colors.warmMuted },
   trial: { label: 'Trial', color: theme.colors.warm, bg: theme.colors.warmMuted },
   active: { label: 'Ativo', color: theme.colors.mint, bg: 'rgba(0,210,150,0.12)' },
   past_due: { label: 'Vencido', color: theme.colors.danger, bg: theme.colors.dangerMuted },
@@ -81,7 +82,7 @@ export default function AdminDashboard() {
         {[
           { label: 'Empresas', value: stats.totalCompanies, color: theme.colors.primary },
           { label: 'Assinaturas ativas', value: stats.activeSubs, color: theme.colors.mint },
-          { label: 'Em trial', value: stats.trialSubs, color: theme.colors.warm },
+          { label: 'Aguardando pgto', value: stats.pendingSubs, color: theme.colors.warm },
           { label: 'MRR', value: fmtBRL(stats.mrr), color: theme.colors.mint, isCurrency: true },
         ].map((m, i) => (
           <div key={i} style={{ ...panelStyle, padding: 20 }}>
@@ -209,7 +210,7 @@ export default function AdminDashboard() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: theme.colors.bgSecondary }}>
-                  {['Empresa', 'Valor', 'Metodo', 'Status', 'Data'].map(h => (
+                  {['Empresa', 'Valor', 'Metodo', 'Status', 'Data', ''].map(h => (
                     <th key={h} className="eyebrow" style={{
                       padding: '12px 14px', textAlign: 'left',
                       borderBottom: `1px solid ${theme.colors.border}`,
@@ -237,6 +238,27 @@ export default function AdminDashboard() {
                     </td>
                     <td className="mono tnum" style={{ padding: '12px 14px', fontSize: 12, color: theme.colors.textMuted }}>
                       {p.paid_at ? new Date(p.paid_at).toLocaleDateString('pt-BR') : '---'}
+                    </td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                      <button
+                        onClick={async () => {
+                          if (!confirm('Excluir este registro de pagamento?')) return
+                          try {
+                            await api.admin.deletePayment(p.id)
+                            loadData()
+                          } catch (err) { alert(err.message) }
+                        }}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: theme.colors.textFaint, fontSize: 11, padding: '4px 8px',
+                          borderRadius: 4,
+                        }}
+                        title="Excluir pagamento"
+                        onMouseOver={e => e.target.style.color = theme.colors.danger}
+                        onMouseOut={e => e.target.style.color = theme.colors.textFaint}
+                      >
+                        <Icon name="trash" size={13} />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -270,6 +292,12 @@ function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, onDeleteCom
   const [paymentAmount, setPaymentAmount] = useState(company.plan_price || '')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [plans, setPlans] = useState([])
+  const [selectedPlanId, setSelectedPlanId] = useState(company.plan_id || '')
+
+  useEffect(() => {
+    api.admin.plans().then(setPlans).catch(console.error)
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -311,6 +339,28 @@ function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, onDeleteCom
         </div>
       </div>
 
+      {/* Change plan */}
+      <div className="eyebrow">Plano</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <select
+          value={selectedPlanId}
+          onChange={e => setSelectedPlanId(parseInt(e.target.value))}
+          style={{ ...inputStyle, flex: 1, fontSize: 13 }}
+        >
+          <option value="">Selecionar plano...</option>
+          {plans.map(p => (
+            <option key={p.id} value={p.id}>{p.name} — R${p.price.toFixed(2)}/mes</option>
+          ))}
+        </select>
+        <button
+          onClick={() => { if (selectedPlanId) onUpdateSub(company.id, { plan_id: selectedPlanId }) }}
+          disabled={loading || !selectedPlanId || selectedPlanId === company.plan_id}
+          style={{ ...btnPrimary, opacity: (loading || !selectedPlanId || selectedPlanId === company.plan_id) ? 0.4 : 1 }}
+        >
+          Alterar
+        </button>
+      </div>
+
       {/* Actions */}
       <div className="eyebrow">Acoes rapidas</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -333,7 +383,7 @@ function CompanyManagePanel({ company, onUpdateSub, onRecordPayment, onDeleteCom
             Suspender conta
           </button>
         )}
-        {(company.sub_status === 'suspended' || company.sub_status === 'cancelled') && (
+        {(company.sub_status === 'suspended' || company.sub_status === 'cancelled' || company.sub_status === 'pending') && (
           <button
             onClick={() => onUpdateSub(company.id, { status: 'active' })}
             disabled={loading}

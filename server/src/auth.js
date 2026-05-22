@@ -50,18 +50,23 @@ function requireActiveSubscription(req, res, next) {
 
   // No subscription found — check if company was created before SaaS system (legacy)
   if (!sub) {
-    // Allow access but attach info so frontend can show banner
     req.subscription = { status: 'none', legacy: true }
     return next()
   }
 
   const now = new Date().toISOString()
 
+  // Always allow access to payment/settings/auth routes (user needs these to pay)
+  const path = req.originalUrl || req.url || ''
+  const isPaymentRoute = path.includes('/payment/') || path.includes('/settings') || path.includes('/subscription') || path.includes('/auth/')
+  if (isPaymentRoute) {
+    req.subscription = sub
+    return next()
+  }
+
   if (sub.status === 'active') {
-    // Check if period has ended
     if (sub.current_period_end && sub.current_period_end < now) {
       req.subscription = { ...sub, status: 'past_due' }
-      // Still allow access with warning
       return next()
     }
     req.subscription = sub
@@ -70,15 +75,22 @@ function requireActiveSubscription(req, res, next) {
 
   if (sub.status === 'trial') {
     if (sub.trial_ends_at && sub.trial_ends_at < now) {
-      // Trial expired
       return res.status(402).json({
-        error: 'Período de teste expirado',
+        error: 'Periodo de teste expirado',
         code: 'TRIAL_EXPIRED',
         subscription: { status: 'trial_expired' }
       })
     }
     req.subscription = sub
     return next()
+  }
+
+  if (sub.status === 'pending') {
+    return res.status(402).json({
+      error: 'Realize o pagamento para ativar sua conta',
+      code: 'PAYMENT_REQUIRED',
+      subscription: { status: 'pending', plan_name: sub.plan_name }
+    })
   }
 
   if (sub.status === 'suspended' || sub.status === 'cancelled') {

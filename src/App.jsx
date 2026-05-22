@@ -60,7 +60,7 @@ export default function App() {
 
       {/* Auth routes */}
       <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
-      <Route path="/register" element={user ? <Navigate to="/dashboard" /> : <Register />} />
+      <Route path="/register" element={<Register />} />
       <Route path="/invite/:token" element={<Invite />} />
 
       {/* Protected app routes */}

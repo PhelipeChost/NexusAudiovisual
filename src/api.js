@@ -153,6 +153,7 @@ const api = {
     companies: () => request('/admin/companies'),
     updateSubscription: (companyId, data) => request(`/admin/subscriptions/${companyId}`, { method: 'PUT', body: JSON.stringify(data) }),
     recordPayment: (data) => request('/admin/payments', { method: 'POST', body: JSON.stringify(data) }),
+    deletePayment: (id) => request(`/admin/payments/${id}`, { method: 'DELETE' }),
     plans: () => request('/admin/plans'),
     createPlan: (data) => request('/admin/plans', { method: 'POST', body: JSON.stringify(data) }),
     updatePlan: (id, data) => request(`/admin/plans/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

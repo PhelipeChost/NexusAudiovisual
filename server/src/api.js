@@ -81,12 +81,22 @@ router.post('/auth/register', (req, res) => {
   }
 
   // Gestor registration: creates workspace
+  const { plan_id } = req.body
   if (!name || !email || !password || !companyName) {
     return res.status(400).json({ error: 'Campos obrigatórios faltando' })
   }
 
   const existing = get('SELECT id FROM users WHERE email = ?', [email])
   if (existing) return res.status(400).json({ error: 'Email já cadastrado' })
+
+  // Validate chosen plan (if provided)
+  let chosenPlan = null
+  if (plan_id) {
+    chosenPlan = get('SELECT * FROM plans WHERE id = ? AND active = 1', [plan_id])
+  }
+  if (!chosenPlan) {
+    chosenPlan = get('SELECT * FROM plans WHERE active = 1 ORDER BY price LIMIT 1')
+  }
 
   const hash = bcrypt.hashSync(password, 10)
   const companyResult = run('INSERT INTO companies (name) VALUES (?)', [companyName])
@@ -97,17 +107,15 @@ router.post('/auth/register', (req, res) => {
     [companyId, name, email, hash, 'gestor']
   )
 
-  // Create trial subscription (7 days)
-  const defaultPlan = get('SELECT id FROM plans WHERE active = 1 ORDER BY price LIMIT 1')
-  const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  // Create subscription with 'pending' status — needs payment to activate
   run(
-    'INSERT INTO subscriptions (company_id, plan_id, status, trial_ends_at) VALUES (?, ?, ?, ?)',
-    [companyId, defaultPlan?.id || null, 'trial', trialEnd]
+    'INSERT INTO subscriptions (company_id, plan_id, status) VALUES (?, ?, ?)',
+    [companyId, chosenPlan?.id || 1, 'pending']
   )
 
   const user = { id: userResult.lastInsertRowid, company_id: companyId, role: 'gestor', name, email }
   const token = generateToken(user)
-  res.json({ token, user: { id: user.id, name, email, role: 'gestor', company_id: companyId } })
+  res.json({ token, user: { id: user.id, name, email, role: 'gestor', company_id: companyId, plan_name: chosenPlan?.name || 'Profissional' } })
 })
 
 router.post('/auth/login', (req, res) => {
@@ -1867,6 +1875,7 @@ router.get('/admin/dashboard', authMiddleware, requireRole('admin'), (req, res) 
   const totalOrders = get("SELECT COUNT(*) as count FROM orders").count
 
   const activeSubs = get("SELECT COUNT(*) as count FROM subscriptions WHERE status = 'active'").count
+  const pendingSubs = get("SELECT COUNT(*) as count FROM subscriptions WHERE status = 'pending'").count
   const trialSubs = get("SELECT COUNT(*) as count FROM subscriptions WHERE status = 'trial'").count
   const cancelledSubs = get("SELECT COUNT(*) as count FROM subscriptions WHERE status IN ('cancelled','suspended')").count
 
@@ -1893,7 +1902,7 @@ router.get('/admin/dashboard', authMiddleware, requireRole('admin'), (req, res) 
   )
 
   res.json({
-    stats: { totalCompanies, totalUsers, totalGestors, totalOrders, activeSubs, trialSubs, cancelledSubs, mrr },
+    stats: { totalCompanies, totalUsers, totalGestors, totalOrders, activeSubs, pendingSubs, trialSubs, cancelledSubs, mrr },
     recentPayments,
     companies: recentCompanies,
   })
@@ -1907,7 +1916,7 @@ router.get('/admin/companies', authMiddleware, requireRole('admin'), (req, res) 
        (SELECT COUNT(*) FROM users WHERE company_id = c.id AND role = 'editor' AND active = 1) as editor_count,
        (SELECT COUNT(*) FROM users WHERE company_id = c.id AND role = 'gestor' AND active = 1) as gestor_count,
        (SELECT COUNT(*) FROM clients WHERE company_id = c.id AND active = 1) as client_count,
-       s.id as sub_id, s.status as sub_status, s.trial_ends_at, s.current_period_start, s.current_period_end,
+       s.id as sub_id, s.status as sub_status, s.plan_id, s.trial_ends_at, s.current_period_start, s.current_period_end,
        p.name as plan_name, p.price as plan_price,
        (SELECT u.name FROM users u WHERE u.company_id = c.id AND u.role = 'gestor' LIMIT 1) as gestor_name,
        (SELECT u.email FROM users u WHERE u.company_id = c.id AND u.role = 'gestor' LIMIT 1) as gestor_email
@@ -1975,6 +1984,15 @@ router.post('/admin/payments', authMiddleware, requireRole('admin'), (req, res) 
     ['active', new Date().toISOString(), end, company_id]
   )
 
+  res.json({ success: true })
+})
+
+// Delete a payment record (admin only — for removing test payments)
+router.delete('/admin/payments/:id', authMiddleware, requireRole('admin'), (req, res) => {
+  const paymentId = parseInt(req.params.id)
+  const payment = get('SELECT * FROM subscription_payments WHERE id = ?', [paymentId])
+  if (!payment) return res.status(404).json({ error: 'Pagamento nao encontrado' })
+  run('DELETE FROM subscription_payments WHERE id = ?', [paymentId])
   res.json({ success: true })
 })
 
