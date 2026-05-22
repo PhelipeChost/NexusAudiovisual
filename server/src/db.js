@@ -421,11 +421,11 @@ async function initDb() {
 
   // Migrate subscriptions table to include 'pending' status
   try {
-    // Test if 'pending' is allowed by inserting and rolling back
     const testOk = db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='subscriptions'")
     const tableSql = testOk[0]?.values[0]?.[0] || ''
     if (tableSql && !tableSql.includes("'pending'")) {
-      // Recreate table with updated CHECK
+      // Temporarily disable FK checks for migration
+      db.run('PRAGMA foreign_keys = OFF')
       db.run(`CREATE TABLE IF NOT EXISTS subscriptions_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         company_id INTEGER NOT NULL UNIQUE,
@@ -445,6 +445,8 @@ async function initDb() {
       db.run(`INSERT INTO subscriptions_new SELECT * FROM subscriptions`)
       db.run(`DROP TABLE subscriptions`)
       db.run(`ALTER TABLE subscriptions_new RENAME TO subscriptions`)
+      db.run('PRAGMA foreign_keys = ON')
+      console.log('Subscription migration: added pending status successfully')
     }
   } catch (e) { console.log('Subscription migration note:', e.message) }
 
