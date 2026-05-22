@@ -709,21 +709,27 @@ function PlanCard({ plan, saving, onSave, onDelete, onToggleFeatured, onLocalUpd
 
         {/* Benefits */}
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <label className="eyebrow" style={{ fontSize: 9.5 }}>Beneficios</label>
+          <label className="eyebrow" style={{ display: 'block', marginBottom: 8, fontSize: 9.5 }}>Beneficios</label>
+
+          {/* Inline input to add benefit */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <input
+              value={newBenefit}
+              onChange={e => setNewBenefit(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addBenefit() } }}
+              placeholder="Digite o beneficio..."
+              style={{ ...inputStyle, flex: 1, fontSize: 12, padding: '6px 10px' }}
+            />
             <button
-              onClick={() => {
-                const text = prompt('Nome do beneficio:')
-                if (text?.trim()) {
-                  const benefits = [...(plan.benefits || []), { text: text.trim(), included: true }]
-                  onLocalUpdate({ benefits })
-                }
-              }}
+              onClick={addBenefit}
+              disabled={!newBenefit.trim()}
               style={{
-                ...btnSoft, padding: '3px 10px', fontSize: 10.5,
+                ...btnSoft, padding: '6px 12px', fontSize: 11,
+                opacity: newBenefit.trim() ? 1 : 0.4,
+                cursor: newBenefit.trim() ? 'pointer' : 'default',
               }}
             >
-              + Adicionar
+              +
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

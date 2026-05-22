@@ -132,7 +132,7 @@ export default function Dashboard() {
                 {stats.totalOrders} pedidos no total
               </h3>
             </div>
-            <button onClick={() => navigate('/clients')}
+            <button onClick={() => navigate('/dashboard/clients')}
               style={{ fontSize: 12, color: theme.colors.primary, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               ver kanbans <Icon name="arrowRight" size={11} stroke />
             </button>
@@ -261,7 +261,7 @@ export default function Dashboard() {
               <div className="eyebrow" style={{ marginBottom: 4 }}>Volume por cliente</div>
               <h3 className="display" style={{ fontSize: 22, margin: 0, color: theme.colors.text }}>Top clientes</h3>
             </div>
-            <button onClick={() => navigate('/clients')}
+            <button onClick={() => navigate('/dashboard/clients')}
               style={{ fontSize: 12, color: theme.colors.primary }}>
               todos
             </button>

@@ -21,14 +21,14 @@ import LandingPage from './pages/LandingPage'
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
   if (loading) return null
-  return user ? children : <Navigate to="/login" />
+  return user ? children : <Navigate to="/" />
 }
 
 function AdminRoute({ children }) {
   const { user, loading } = useAuth()
   if (loading) return null
-  if (!user) return <Navigate to="/login" />
-  if (user.role !== 'admin') return <Navigate to="/" />
+  if (!user) return <Navigate to="/" />
+  if (user.role !== 'admin') return <Navigate to="/dashboard" />
   return children
 }
 
@@ -54,14 +54,17 @@ export default function App() {
 
   return (
     <Routes>
-      {/* Landing page — only for unauthenticated users */}
-      <Route path="/landing" element={user ? <Navigate to="/" /> : <LandingPage />} />
-      <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
-      <Route path="/register" element={user ? <Navigate to="/" /> : <Register />} />
+      {/* Landing page — always accessible (even when logged in) */}
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/landing" element={<Navigate to="/" />} />
+
+      {/* Auth routes */}
+      <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
+      <Route path="/register" element={user ? <Navigate to="/dashboard" /> : <Register />} />
       <Route path="/invite/:token" element={<Invite />} />
 
       {/* Protected app routes */}
-      <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+      <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<RoleDashboard />} />
         <Route path="board" element={<EditorBoard />} />
         <Route path="clients" element={<Clients />} />
@@ -74,8 +77,8 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
       </Route>
 
-      {/* Catch-all: unauthenticated go to landing, authenticated go to dashboard */}
-      <Route path="*" element={user ? <Navigate to="/" /> : <Navigate to="/landing" />} />
+      {/* Catch-all: go to landing */}
+      <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   )
 }

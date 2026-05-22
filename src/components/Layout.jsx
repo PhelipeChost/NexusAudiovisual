@@ -11,27 +11,27 @@ export const SidebarContext = createContext({ collapsed: false })
 export function useSidebar() { return useContext(SidebarContext) }
 
 const ALL_NAV_ITEMS = [
-  { path: '/', label: 'Panorama',      icon: 'dashboard', roles: ['gestor', 'editor', 'cliente', 'admin'], end: true },
-  { path: '/board', label: 'Mapa',     icon: 'film', roles: ['editor'] },
-  { path: '/clients', label: 'Clientes', icon: 'clients', roles: ['gestor'] },
-  { path: '/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
-  { path: '/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
-  { path: '/calendar', label: 'Calendario', icon: 'calendar', roles: ['gestor'] },
-  { path: '/reports', label: 'Relatorios', icon: 'briefcase', roles: ['gestor'] },
-  { path: '/admin', label: 'Administracao', icon: 'settings', roles: ['admin'] },
-  { path: '/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente', 'admin'] },
+  { path: '/dashboard', label: 'Panorama',      icon: 'dashboard', roles: ['gestor', 'editor', 'cliente', 'admin'], end: true },
+  { path: '/dashboard/board', label: 'Mapa',     icon: 'film', roles: ['editor'] },
+  { path: '/dashboard/clients', label: 'Clientes', icon: 'clients', roles: ['gestor'] },
+  { path: '/dashboard/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
+  { path: '/dashboard/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
+  { path: '/dashboard/calendar', label: 'Calendario', icon: 'calendar', roles: ['gestor'] },
+  { path: '/dashboard/reports', label: 'Relatorios', icon: 'briefcase', roles: ['gestor'] },
+  { path: '/dashboard/admin', label: 'Administracao', icon: 'settings', roles: ['admin'] },
+  { path: '/dashboard/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente', 'admin'] },
 ]
 
 const PAGE_TITLES = {
-  '/': 'Panorama',
-  '/board': 'Mapa',
-  '/clients': 'Clientes',
-  '/team': 'Equipe',
-  '/financial': 'Financeiro',
-  '/calendar': 'Calendario',
-  '/reports': 'Relatorios',
-  '/admin': 'Administracao',
-  '/settings': 'Configuracoes',
+  '/dashboard': 'Panorama',
+  '/dashboard/board': 'Mapa',
+  '/dashboard/clients': 'Clientes',
+  '/dashboard/team': 'Equipe',
+  '/dashboard/financial': 'Financeiro',
+  '/dashboard/calendar': 'Calendario',
+  '/dashboard/reports': 'Relatorios',
+  '/dashboard/admin': 'Administracao',
+  '/dashboard/settings': 'Configuracoes',
 }
 
 const SIDEBAR_WIDTH = 232
@@ -122,7 +122,7 @@ export default function Layout() {
       }}>
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28, minHeight: 36 }}>
-          <button onClick={() => navigate('/')} style={{
+          <button onClick={() => navigate('/dashboard')} style={{
             display: 'flex', alignItems: 'center', gap: 12,
             padding: '4px 8px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
             overflow: 'hidden', whiteSpace: 'nowrap',

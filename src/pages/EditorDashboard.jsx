@@ -50,7 +50,7 @@ export default function EditorDashboard() {
             )}
           </h2>
         </div>
-        <button onClick={() => navigate('/board')} style={{
+        <button onClick={() => navigate('/dashboard/board')} style={{
           display: 'inline-flex', alignItems: 'center', gap: 8,
           padding: '9px 18px', borderRadius: 8,
           background: theme.colors.bgSecondary,

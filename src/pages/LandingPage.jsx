@@ -1,6 +1,7 @@
 // src/pages/LandingPage.jsx — Landing page publica do Nexus SaaS
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import api from '../api'
 
 const colors = {
@@ -57,13 +58,19 @@ const FEATURES = [
 
 export default function LandingPage() {
   const navigate = useNavigate()
-  const [plan, setPlan] = useState(null)
+  const { user } = useAuth()
+  const [plans, setPlans] = useState([])
   const [stats, setStats] = useState(null)
 
   useEffect(() => {
-    api.public.plans().then(d => { const arr = Array.isArray(d) ? d : d.plans || []; if (arr.length) setPlan(arr[0]) }).catch(() => {})
+    api.public.plans().then(d => {
+      const arr = Array.isArray(d) ? d : d.plans || []
+      setPlans(arr)
+    }).catch(() => {})
     api.public.stats().then(d => setStats(d)).catch(() => {})
   }, [])
+
+  const dashPath = '/dashboard'
 
   return (
     <div style={{ background: colors.bg, color: colors.text, minHeight: '100vh', fontFamily: "'Inter', system-ui, sans-serif" }}>
@@ -87,34 +94,53 @@ export default function LandingPage() {
           <span style={{ fontSize: 12, color: colors.textMuted, marginTop: 4 }}>Audiovisual</span>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
-          <button
-            onClick={() => navigate('/login')}
-            style={{
-              padding: '9px 22px', borderRadius: 8,
-              background: 'transparent',
-              border: `1px solid ${colors.borderLight}`,
-              color: colors.textSecondary, fontSize: 14, fontWeight: 500,
-              cursor: 'pointer', transition: 'all 0.2s',
-            }}
-            onMouseOver={e => e.target.style.borderColor = colors.primary}
-            onMouseOut={e => e.target.style.borderColor = colors.borderLight}
-          >
-            Entrar
-          </button>
-          <button
-            onClick={() => navigate('/register')}
-            style={{
-              padding: '9px 22px', borderRadius: 8,
-              background: colors.primary,
-              border: 'none',
-              color: colors.bg, fontSize: 14, fontWeight: 600,
-              cursor: 'pointer', transition: 'all 0.2s',
-            }}
-            onMouseOver={e => e.target.style.background = colors.primaryHover}
-            onMouseOut={e => e.target.style.background = colors.primary}
-          >
-            Comecar Gratis
-          </button>
+          {user ? (
+            <button
+              onClick={() => navigate(dashPath)}
+              style={{
+                padding: '9px 22px', borderRadius: 8,
+                background: colors.primary,
+                border: 'none',
+                color: colors.bg, fontSize: 14, fontWeight: 600,
+                cursor: 'pointer', transition: 'all 0.2s',
+              }}
+              onMouseOver={e => e.target.style.background = colors.primaryHover}
+              onMouseOut={e => e.target.style.background = colors.primary}
+            >
+              Ir para o painel
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => navigate('/login')}
+                style={{
+                  padding: '9px 22px', borderRadius: 8,
+                  background: 'transparent',
+                  border: `1px solid ${colors.borderLight}`,
+                  color: colors.textSecondary, fontSize: 14, fontWeight: 500,
+                  cursor: 'pointer', transition: 'all 0.2s',
+                }}
+                onMouseOver={e => e.target.style.borderColor = colors.primary}
+                onMouseOut={e => e.target.style.borderColor = colors.borderLight}
+              >
+                Entrar
+              </button>
+              <button
+                onClick={() => navigate('/register')}
+                style={{
+                  padding: '9px 22px', borderRadius: 8,
+                  background: colors.primary,
+                  border: 'none',
+                  color: colors.bg, fontSize: 14, fontWeight: 600,
+                  cursor: 'pointer', transition: 'all 0.2s',
+                }}
+                onMouseOver={e => e.target.style.background = colors.primaryHover}
+                onMouseOut={e => e.target.style.background = colors.primary}
+              >
+                Comecar Gratis
+              </button>
+            </>
+          )}
         </div>
       </nav>
 
@@ -164,33 +190,53 @@ export default function LandingPage() {
         </p>
 
         <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => navigate('/register')}
-            style={{
-              padding: '14px 36px', borderRadius: 10,
-              background: colors.primary,
-              border: 'none',
-              color: colors.bg, fontSize: 16, fontWeight: 700,
-              cursor: 'pointer', transition: 'all 0.2s',
-              boxShadow: `0 0 30px rgba(127, 219, 255, 0.2)`,
-            }}
-            onMouseOver={e => { e.target.style.background = colors.primaryHover; e.target.style.transform = 'translateY(-2px)' }}
-            onMouseOut={e => { e.target.style.background = colors.primary; e.target.style.transform = 'none' }}
-          >
-            Comecar Agora
-          </button>
-          <button
-            onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
-            style={{
-              padding: '14px 36px', borderRadius: 10,
-              background: colors.surface,
-              border: `1px solid ${colors.borderLight}`,
-              color: colors.textSecondary, fontSize: 16, fontWeight: 500,
-              cursor: 'pointer', transition: 'all 0.2s',
-            }}
-          >
-            Ver Recursos
-          </button>
+          {user ? (
+            <button
+              onClick={() => navigate(dashPath)}
+              style={{
+                padding: '14px 36px', borderRadius: 10,
+                background: colors.primary,
+                border: 'none',
+                color: colors.bg, fontSize: 16, fontWeight: 700,
+                cursor: 'pointer', transition: 'all 0.2s',
+                boxShadow: `0 0 30px rgba(127, 219, 255, 0.2)`,
+              }}
+              onMouseOver={e => { e.target.style.background = colors.primaryHover; e.target.style.transform = 'translateY(-2px)' }}
+              onMouseOut={e => { e.target.style.background = colors.primary; e.target.style.transform = 'none' }}
+            >
+              Acessar Painel
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => navigate('/register')}
+                style={{
+                  padding: '14px 36px', borderRadius: 10,
+                  background: colors.primary,
+                  border: 'none',
+                  color: colors.bg, fontSize: 16, fontWeight: 700,
+                  cursor: 'pointer', transition: 'all 0.2s',
+                  boxShadow: `0 0 30px rgba(127, 219, 255, 0.2)`,
+                }}
+                onMouseOver={e => { e.target.style.background = colors.primaryHover; e.target.style.transform = 'translateY(-2px)' }}
+                onMouseOut={e => { e.target.style.background = colors.primary; e.target.style.transform = 'none' }}
+              >
+                Comecar Agora
+              </button>
+              <button
+                onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
+                style={{
+                  padding: '14px 36px', borderRadius: 10,
+                  background: colors.surface,
+                  border: `1px solid ${colors.borderLight}`,
+                  color: colors.textSecondary, fontSize: 16, fontWeight: 500,
+                  cursor: 'pointer', transition: 'all 0.2s',
+                }}
+              >
+                Ver Recursos
+              </button>
+            </>
+          )}
         </div>
 
         {/* Stats */}
@@ -254,98 +300,72 @@ export default function LandingPage() {
 
       {/* Pricing */}
       <section id="pricing" style={{
-        maxWidth: 600, margin: '0 auto',
+        maxWidth: plans.length > 1 ? 1200 : 600, margin: '0 auto',
         padding: '60px 32px 80px',
         textAlign: 'center',
       }}>
         <h2 style={{ fontSize: 32, fontWeight: 700, letterSpacing: '-0.02em', margin: '0 0 12px' }}>
-          Preco simples e transparente
+          {plans.length > 1 ? 'Escolha o plano ideal' : 'Preco simples e transparente'}
         </h2>
         <p style={{ color: colors.textMuted, fontSize: 16, marginBottom: 40 }}>
-          Um unico plano com acesso completo. Comece gratis.
+          {plans.length > 1 ? 'Planos para cada etapa do seu negocio. Comece gratis.' : 'Um unico plano com acesso completo. Comece gratis.'}
         </p>
 
         <div style={{
-          background: colors.bgSecondary,
-          border: `1px solid ${colors.borderLight}`,
-          borderRadius: 18,
-          padding: '40px 36px',
-          position: 'relative',
-          overflow: 'hidden',
+          display: 'grid',
+          gridTemplateColumns: plans.length > 1 ? `repeat(${Math.min(plans.length, 4)}, 1fr)` : '1fr',
+          gap: 20,
+          maxWidth: plans.length === 1 ? 420 : undefined,
+          margin: plans.length === 1 ? '0 auto' : undefined,
         }}>
-          {/* Glow effect */}
-          <div style={{
-            position: 'absolute', top: -60, right: -60,
-            width: 200, height: 200, borderRadius: '50%',
-            background: `radial-gradient(circle, rgba(127, 219, 255, 0.08), transparent 70%)`,
-            pointerEvents: 'none',
-          }} />
-
-          <div style={{
-            display: 'inline-block',
-            padding: '4px 14px', borderRadius: 16,
-            background: colors.primaryMuted,
-            color: colors.primary,
-            fontSize: 12, fontWeight: 600,
-            marginBottom: 16,
-          }}>
-            {plan?.name || 'Profissional'}
-          </div>
-
-          <div style={{ marginBottom: 8 }}>
-            <span style={{ fontSize: 48, fontWeight: 800 }}>
-              R${plan ? plan.price.toFixed(0) : '97'}
-            </span>
-            <span style={{ fontSize: 16, color: colors.textMuted }}>/mes</span>
-          </div>
-
-          <p style={{ color: colors.textMuted, fontSize: 14, marginBottom: 28 }}>
-            {plan?.description || 'Acesso completo a todas as ferramentas'}
-          </p>
-
-          <div style={{ textAlign: 'left', marginBottom: 32 }}>
-            {[
-              'Clientes ilimitados',
-              'Editores ilimitados',
-              'Pedidos ilimitados',
-              'Portal do cliente',
-              'Gestao financeira',
-              'Calendario de entregas',
-              'Relatorios de performance',
-              'Suporte prioritario',
-            ].map(item => (
-              <div key={item} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '8px 0',
-                color: colors.textSecondary,
-                fontSize: 14,
-              }}>
-                <span style={{ color: colors.success, fontSize: 16 }}>✓</span>
-                {item}
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={() => navigate('/register')}
-            style={{
-              width: '100%',
-              padding: '14px', borderRadius: 10,
-              background: colors.primary,
-              border: 'none',
-              color: colors.bg, fontSize: 16, fontWeight: 700,
-              cursor: 'pointer', transition: 'all 0.2s',
-            }}
-            onMouseOver={e => e.target.style.background = colors.primaryHover}
-            onMouseOut={e => e.target.style.background = colors.primary}
-          >
-            Comecar 7 Dias Gratis
-          </button>
-
-          <p style={{ fontSize: 12, color: colors.textFaint, marginTop: 12 }}>
-            Sem cartao de credito. Cancele quando quiser.
-          </p>
+          {plans.map(plan => (
+            <PlanCard key={plan.id} plan={plan} navigate={navigate} user={user} dashPath={dashPath} />
+          ))}
         </div>
+
+        {plans.length === 0 && (
+          <div style={{
+            background: colors.bgSecondary,
+            border: `1px solid ${colors.borderLight}`,
+            borderRadius: 18,
+            padding: '40px 36px',
+            maxWidth: 420,
+            margin: '0 auto',
+          }}>
+            <div style={{
+              display: 'inline-block',
+              padding: '4px 14px', borderRadius: 16,
+              background: colors.primaryMuted,
+              color: colors.primary,
+              fontSize: 12, fontWeight: 600,
+              marginBottom: 16,
+            }}>
+              Profissional
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <span style={{ fontSize: 48, fontWeight: 800 }}>R$97</span>
+              <span style={{ fontSize: 16, color: colors.textMuted }}>/mes</span>
+            </div>
+            <p style={{ color: colors.textMuted, fontSize: 14, marginBottom: 28 }}>
+              Acesso completo a todas as ferramentas
+            </p>
+            <button
+              onClick={() => navigate(user ? dashPath : '/register')}
+              style={{
+                width: '100%',
+                padding: '14px', borderRadius: 10,
+                background: colors.primary,
+                border: 'none',
+                color: colors.bg, fontSize: 16, fontWeight: 700,
+                cursor: 'pointer', transition: 'all 0.2s',
+              }}
+              onMouseOver={e => e.target.style.background = colors.primaryHover}
+              onMouseOut={e => e.target.style.background = colors.primary}
+            >
+              {user ? 'Acessar Painel' : 'Comecar 7 Dias Gratis'}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* CTA */}
@@ -361,7 +381,7 @@ export default function LandingPage() {
           Junte-se a gestores que ja simplificaram sua operacao com o Nexus.
         </p>
         <button
-          onClick={() => navigate('/register')}
+          onClick={() => navigate(user ? dashPath : '/register')}
           style={{
             padding: '14px 40px', borderRadius: 10,
             background: colors.primary,
@@ -373,7 +393,7 @@ export default function LandingPage() {
           onMouseOver={e => { e.target.style.background = colors.primaryHover; e.target.style.transform = 'translateY(-2px)' }}
           onMouseOut={e => { e.target.style.background = colors.primary; e.target.style.transform = 'none' }}
         >
-          Criar Minha Conta Gratis
+          {user ? 'Acessar Painel' : 'Criar Minha Conta Gratis'}
         </button>
       </section>
 
@@ -387,6 +407,170 @@ export default function LandingPage() {
       }}>
         © {new Date().getFullYear()} Nexus Audiovisual. Todos os direitos reservados.
       </footer>
+    </div>
+  )
+}
+
+function PlanCard({ plan, navigate, user, dashPath }) {
+  const benefits = Array.isArray(plan.benefits) ? plan.benefits : []
+  const hasBenefits = benefits.length > 0
+
+  return (
+    <div style={{
+      background: colors.bgSecondary,
+      border: plan.featured ? `2px solid ${colors.warm}` : `1px solid ${colors.borderLight}`,
+      borderRadius: 18,
+      padding: '40px 28px 32px',
+      position: 'relative',
+      overflow: 'hidden',
+      textAlign: 'left',
+    }}>
+      {/* Glow effect */}
+      <div style={{
+        position: 'absolute', top: -60, right: -60,
+        width: 200, height: 200, borderRadius: '50%',
+        background: `radial-gradient(circle, rgba(127, 219, 255, 0.08), transparent 70%)`,
+        pointerEvents: 'none',
+      }} />
+
+      {/* Featured badge */}
+      {plan.featured ? (
+        <div style={{
+          display: 'inline-block',
+          padding: '5px 14px', borderRadius: 16,
+          background: 'rgba(255,138,107,0.15)',
+          color: colors.warm,
+          fontSize: 11, fontWeight: 700,
+          marginBottom: 16,
+          border: '1px solid rgba(255,138,107,0.25)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+        }}>
+          ★ Mais escolhido
+        </div>
+      ) : (
+        <div style={{
+          display: 'inline-block',
+          padding: '4px 14px', borderRadius: 16,
+          background: colors.primaryMuted,
+          color: colors.primary,
+          fontSize: 12, fontWeight: 600,
+          marginBottom: 16,
+        }}>
+          {plan.name}
+        </div>
+      )}
+
+      {plan.featured && (
+        <div style={{
+          fontSize: 13, fontWeight: 600, color: colors.textMuted, marginBottom: 4,
+        }}>
+          {plan.name}
+        </div>
+      )}
+
+      <div style={{ marginBottom: 4 }}>
+        <span style={{ fontSize: 44, fontWeight: 800 }}>
+          R${plan.price % 1 === 0 ? plan.price.toFixed(0) : plan.price.toFixed(2).replace('.', ',')}
+        </span>
+        <span style={{ fontSize: 16, color: colors.textMuted }}>/mes</span>
+      </div>
+
+      {plan.type && (
+        <div style={{ fontSize: 12, color: colors.textFaint, marginBottom: 4 }}>
+          {plan.type}
+        </div>
+      )}
+
+      {plan.description && (
+        <p style={{ color: colors.textMuted, fontSize: 13, marginBottom: 24, lineHeight: 1.5 }}>
+          {plan.description}
+        </p>
+      )}
+
+      {/* Benefits from plan config */}
+      {hasBenefits && (
+        <div style={{ marginBottom: 28 }}>
+          {benefits.map((b, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '7px 0',
+              color: b.included ? colors.textSecondary : colors.textFaint,
+              fontSize: 13.5,
+            }}>
+              <span style={{
+                color: b.included ? colors.success : colors.danger,
+                fontSize: 14, fontWeight: 700, width: 18, textAlign: 'center', flexShrink: 0,
+              }}>
+                {b.included ? '✓' : '✕'}
+              </span>
+              <span style={{
+                textDecoration: b.included ? 'none' : 'none',
+              }}>
+                {b.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Discount tiers */}
+      {(plan.discount_3m > 0 || plan.discount_6m > 0 || plan.discount_12m > 0) && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 11, color: colors.textFaint, marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Descontos por antecipacao
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {plan.discount_3m > 0 && (
+              <span style={{
+                padding: '4px 10px', borderRadius: 6,
+                background: 'rgba(0,210,150,0.1)', color: colors.success,
+                fontSize: 11, fontWeight: 600,
+              }}>
+                3 meses: -{plan.discount_3m}%
+              </span>
+            )}
+            {plan.discount_6m > 0 && (
+              <span style={{
+                padding: '4px 10px', borderRadius: 6,
+                background: 'rgba(0,210,150,0.1)', color: colors.success,
+                fontSize: 11, fontWeight: 600,
+              }}>
+                6 meses: -{plan.discount_6m}%
+              </span>
+            )}
+            {plan.discount_12m > 0 && (
+              <span style={{
+                padding: '4px 10px', borderRadius: 6,
+                background: 'rgba(0,210,150,0.1)', color: colors.success,
+                fontSize: 11, fontWeight: 600,
+              }}>
+                12 meses: -{plan.discount_12m}%
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={() => navigate(user ? dashPath : '/register')}
+        style={{
+          width: '100%',
+          padding: '13px', borderRadius: 10,
+          background: plan.featured ? colors.warm : colors.primary,
+          border: 'none',
+          color: colors.bg, fontSize: 15, fontWeight: 700,
+          cursor: 'pointer', transition: 'all 0.2s',
+        }}
+        onMouseOver={e => e.target.style.opacity = '0.85'}
+        onMouseOut={e => e.target.style.opacity = '1'}
+      >
+        {user ? 'Acessar Painel' : 'Comecar 7 Dias Gratis'}
+      </button>
+
+      <p style={{ fontSize: 11, color: colors.textFaint, marginTop: 10, textAlign: 'center' }}>
+        Sem cartao de credito. Cancele quando quiser.
+      </p>
     </div>
   )
 }

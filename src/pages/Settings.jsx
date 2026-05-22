@@ -165,7 +165,7 @@ function SubscriptionSettings() {
 
   useEffect(() => {
     loadAll()
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const params = new URLSearchParams(window.location.search)
     const paymentResult = params.get('payment')
     if (paymentResult) {
       const msgs = {
@@ -174,7 +174,7 @@ function SubscriptionSettings() {
         pending: 'Pagamento pendente. Aguarde a confirmacao.',
       }
       setPaymentMsg(msgs[paymentResult] || '')
-      window.history.replaceState(null, '', window.location.pathname + window.location.hash.split('?')[0])
+      window.history.replaceState(null, '', window.location.pathname)
       if (paymentResult === 'success') setTimeout(() => loadAll(), 2000)
     }
   }, [])

@@ -43,7 +43,7 @@ export default function Invite() {
       })
       if (data.token) localStorage.setItem('nexus_token', data.token)
       if (setUser && data?.user) setUser(data.user)
-      navigate('/')
+      navigate('/dashboard')
     } catch (err) {
       setError(err.message || 'Erro ao aceitar convite')
     } finally {

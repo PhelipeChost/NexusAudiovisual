@@ -84,7 +84,7 @@ export default function ClientDetail() {
     setDeletingClient(true)
     try {
       await api.clients.delete(id)
-      navigate('/clients')
+      navigate('/dashboard/clients')
     } catch (err) {
       alert(err.message)
       setDeletingClient(false)
@@ -206,7 +206,7 @@ export default function ClientDetail() {
       {/* Client header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 16, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-          <button onClick={() => navigate('/clients')} style={{
+          <button onClick={() => navigate('/dashboard/clients')} style={{
             ...btnSoft, padding: '7px 10px',
           }} title="Voltar">
             <Icon name="chevronLeft" size={14} />

@@ -2287,9 +2287,9 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
           discount_pct: discountPct,
         }),
         back_urls: {
-          success: `${baseUrl}${basePath}/#/settings?payment=success`,
-          failure: `${baseUrl}${basePath}/#/settings?payment=failure`,
-          pending: `${baseUrl}${basePath}/#/settings?payment=pending`,
+          success: `${baseUrl}${basePath}/dashboard/settings?payment=success`,
+          failure: `${baseUrl}${basePath}/dashboard/settings?payment=failure`,
+          pending: `${baseUrl}${basePath}/dashboard/settings?payment=pending`,
         },
         auto_return: 'approved',
         notification_url: `${baseUrl}${basePath}/api/payment/webhook`,
