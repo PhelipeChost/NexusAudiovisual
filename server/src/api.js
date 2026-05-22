@@ -2429,11 +2429,15 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
     const client = getMPClient()
     if (!client) return res.status(500).json({ error: 'Mercado Pago não configurado.' })
 
-    const { months = 1 } = req.body
+    const { months = 1, cpf } = req.body
     const validMonths = [1, 3, 6, 12]
     if (!validMonths.includes(months)) {
       return res.status(400).json({ error: 'Período inválido' })
     }
+    if (!cpf || cpf.replace(/\D/g, '').length !== 11) {
+      return res.status(400).json({ error: 'CPF do pagador é obrigatório para PIX' })
+    }
+    const cpfClean = cpf.replace(/\D/g, '')
 
     const sub = get(
       'SELECT s.*, p.name as plan_name, p.price as plan_price, p.discount_3m, p.discount_6m, p.discount_12m FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
@@ -2469,6 +2473,10 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
           email: user.email,
           first_name: (user.name || '').split(' ')[0] || 'Cliente',
           last_name: (user.name || '').split(' ').slice(1).join(' ') || 'Nexus',
+          identification: {
+            type: 'CPF',
+            number: cpfClean,
+          },
         },
         external_reference: JSON.stringify({
           company_id: req.user.company_id,

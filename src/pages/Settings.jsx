@@ -170,6 +170,7 @@ function SubscriptionSettings() {
   const [pixData, setPixData] = useState(null) // QR code data from MP
   const [pixCopied, setPixCopied] = useState(false)
   const [pixPolling, setPixPolling] = useState(false)
+  const [pixCpf, setPixCpf] = useState('')
 
   useEffect(() => {
     loadAll()
@@ -571,12 +572,40 @@ function SubscriptionSettings() {
                       R${selectedTier.total.toFixed(2).replace('.', ',')}
                     </div>
                   </div>
+                  <div style={{ marginBottom: 14 }}>
+                    <label className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>CPF do pagador</label>
+                    <input
+                      type="text"
+                      value={pixCpf}
+                      onChange={e => {
+                        const v = e.target.value.replace(/\D/g, '').slice(0, 11)
+                        const formatted = v.length > 9
+                          ? v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4')
+                          : v.length > 6
+                          ? v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3')
+                          : v.length > 3
+                          ? v.replace(/(\d{3})(\d{1,3})/, '$1.$2')
+                          : v
+                        setPixCpf(formatted)
+                      }}
+                      placeholder="000.000.000-00"
+                      style={{ ...inputStyle, width: '100%', fontFamily: theme.fonts.mono, fontSize: 13 }}
+                    />
+                    <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 4 }}>
+                      Obrigatorio pelo Mercado Pago para pagamentos PIX
+                    </div>
+                  </div>
                   <button
                     onClick={async () => {
+                      const cpfClean = pixCpf.replace(/\D/g, '')
+                      if (cpfClean.length !== 11) {
+                        setPaymentMsg('Informe um CPF valido (11 digitos)')
+                        return
+                      }
                       setPaying(true)
                       setPaymentMsg('')
                       try {
-                        const result = await api.payment.createPix(selectedMonths)
+                        const result = await api.payment.createPix(selectedMonths, cpfClean)
                         setPixData(result)
                         // Start polling for payment confirmation
                         setPixPolling(true)
@@ -603,16 +632,16 @@ function SubscriptionSettings() {
                         setPaymentMsg(err.message || 'Erro ao gerar PIX')
                       } finally { setPaying(false) }
                     }}
-                    disabled={paying}
+                    disabled={paying || pixCpf.replace(/\D/g, '').length !== 11}
                     style={{
                       ...btnPrimary,
                       justifyContent: 'center', width: '100%',
                       padding: '14px 20px', fontSize: 15,
                       background: '#32BCAD',
-                      opacity: paying ? 0.6 : 1,
+                      opacity: (paying || pixCpf.replace(/\D/g, '').length !== 11) ? 0.6 : 1,
                       cursor: paying ? 'wait' : 'pointer',
                     }}
-                    onMouseOver={e => { if (!paying) e.target.style.background = '#2aa89a' }}
+                    onMouseOver={e => { if (!paying && pixCpf.replace(/\D/g, '').length === 11) e.target.style.background = '#2aa89a' }}
                     onMouseOut={e => e.target.style.background = '#32BCAD'}
                   >
                     {paying ? 'Gerando QR Code...' : `Gerar PIX — R$${selectedTier.total.toFixed(2).replace('.', ',')}`}
