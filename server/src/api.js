@@ -2280,7 +2280,9 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
 
     const basePath = process.env.BASE_PATH || '/audiovisual'
     const appUrlRow = get("SELECT value FROM platform_settings WHERE key = 'app_url'")
-    const baseUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
+    const rawAppUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
+    // If app_url already ends with basePath, don't duplicate it
+    const baseUrl = rawAppUrl.endsWith(basePath) ? rawAppUrl : rawAppUrl + basePath
 
     const periodLabel = months === 1 ? 'Mensal' : `${months} meses`
 
@@ -2309,12 +2311,12 @@ router.post('/payment/create-preference', authMiddleware, async (req, res) => {
           discount_pct: discountPct,
         }),
         back_urls: {
-          success: `${baseUrl}${basePath}/dashboard/settings?payment=success`,
-          failure: `${baseUrl}${basePath}/dashboard/settings?payment=failure`,
-          pending: `${baseUrl}${basePath}/dashboard/settings?payment=pending`,
+          success: `${baseUrl}/dashboard/settings?payment=success`,
+          failure: `${baseUrl}/dashboard/settings?payment=failure`,
+          pending: `${baseUrl}/dashboard/settings?payment=pending`,
         },
         auto_return: 'approved',
-        notification_url: `${baseUrl}${basePath}/api/payment/webhook`,
+        notification_url: `${baseUrl}/api/payment/webhook`,
       }
     })
 
@@ -2481,7 +2483,9 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
 
     const basePath = process.env.BASE_PATH || '/audiovisual'
     const appUrlRow = get("SELECT value FROM platform_settings WHERE key = 'app_url'")
-    const baseUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
+    const rawAppUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
+    // If app_url already ends with basePath, don't duplicate it
+    const baseUrl = rawAppUrl.endsWith(basePath) ? rawAppUrl : rawAppUrl + basePath
 
     const periodLabel = months === 1 ? 'Mensal' : `${months} meses`
 
@@ -2520,12 +2524,12 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
           discount_pct: discountPct,
         }),
         back_urls: {
-          success: `${baseUrl}${basePath}/dashboard/settings?payment=success`,
-          failure: `${baseUrl}${basePath}/dashboard/settings?payment=failure`,
-          pending: `${baseUrl}${basePath}/dashboard/settings?payment=pending`,
+          success: `${baseUrl}/dashboard/settings?payment=success`,
+          failure: `${baseUrl}/dashboard/settings?payment=failure`,
+          pending: `${baseUrl}/dashboard/settings?payment=pending`,
         },
         auto_return: 'approved',
-        notification_url: `${baseUrl}${basePath}/api/payment/webhook`,
+        notification_url: `${baseUrl}/api/payment/webhook`,
       }
     })
 
