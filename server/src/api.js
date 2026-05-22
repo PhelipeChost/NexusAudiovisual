@@ -2237,23 +2237,14 @@ router.get('/payment/config', authMiddleware, (req, res) => {
     return { months, discountPct, pricePerMonth: Math.round(pricePerMonth * 100) / 100, total, savings }
   })
 
-  // PIX config
-  const pixKeyRow = get("SELECT value FROM platform_settings WHERE key = 'pix_key'")
-  const pixHolderRow = get("SELECT value FROM platform_settings WHERE key = 'pix_holder'")
-  const pixTypeRow = get("SELECT value FROM platform_settings WHERE key = 'pix_type'")
-  const pixKey = pixKeyRow?.value || ''
-  const pixHolder = pixHolderRow?.value || ''
-  const pixType = pixTypeRow?.value || 'cpf'
+  const mpOk = !!getMPClient()
 
   res.json({
     subscription: sub || { status: 'none' },
     basePrice,
     tiers,
-    mpConfigured: !!getMPClient(),
-    pixConfigured: !!pixKey,
-    pixKey,
-    pixHolder,
-    pixType,
+    mpConfigured: mpOk,
+    pixConfigured: mpOk, // PIX is available when MP is configured
   })
 })
 
@@ -2430,95 +2421,101 @@ router.get('/payment/status', authMiddleware, (req, res) => {
   })
 })
 
-// ============ PIX PAYMENT ============
+// ============ PIX PAYMENT (via Mercado Pago) ============
 
-// Create a PIX payment request (user notifies they paid via PIX)
-router.post('/payment/pix', authMiddleware, (req, res) => {
-  const { months = 1 } = req.body
-  const validMonths = [1, 3, 6, 12]
-  if (!validMonths.includes(months)) {
-    return res.status(400).json({ error: 'Período inválido' })
+// Create a PIX payment via Mercado Pago API — returns QR code
+router.post('/payment/pix', authMiddleware, async (req, res) => {
+  try {
+    const client = getMPClient()
+    if (!client) return res.status(500).json({ error: 'Mercado Pago não configurado.' })
+
+    const { months = 1 } = req.body
+    const validMonths = [1, 3, 6, 12]
+    if (!validMonths.includes(months)) {
+      return res.status(400).json({ error: 'Período inválido' })
+    }
+
+    const sub = get(
+      'SELECT s.*, p.name as plan_name, p.price as plan_price, p.discount_3m, p.discount_6m, p.discount_12m FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
+      [req.user.company_id]
+    )
+    if (!sub) return res.status(400).json({ error: 'Nenhuma assinatura encontrada' })
+
+    const user = get('SELECT * FROM users WHERE id = ?', [req.user.id])
+    const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
+
+    // Calculate price with per-plan discount
+    const basePrice = sub.plan_price || 97.90
+    let discountPct = 0
+    if (months === 3) discountPct = sub.discount_3m || 0
+    else if (months === 6) discountPct = sub.discount_6m || 0
+    else if (months === 12) discountPct = sub.discount_12m || 0
+    const pricePerMonth = basePrice * (1 - discountPct / 100)
+    const totalPrice = Math.round(pricePerMonth * months * 100) / 100
+
+    const basePath = process.env.BASE_PATH || '/audiovisual'
+    const appUrlRow = get("SELECT value FROM platform_settings WHERE key = 'app_url'")
+    const baseUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
+
+    const periodLabel = months === 1 ? '1 mes' : `${months} meses`
+
+    const payment = new MPPayment(client)
+    const result = await payment.create({
+      body: {
+        transaction_amount: totalPrice,
+        description: `Nexus Audiovisual - ${sub.plan_name || 'Profissional'} (${periodLabel})`,
+        payment_method_id: 'pix',
+        payer: {
+          email: user.email,
+          first_name: (user.name || '').split(' ')[0] || 'Cliente',
+          last_name: (user.name || '').split(' ').slice(1).join(' ') || 'Nexus',
+        },
+        external_reference: JSON.stringify({
+          company_id: req.user.company_id,
+          subscription_id: sub.id,
+          user_id: req.user.id,
+          months,
+          discount_pct: discountPct,
+        }),
+        notification_url: `${baseUrl}${basePath}/api/payment/webhook`,
+      }
+    })
+
+    // Extract PIX data from response
+    const txData = result.point_of_interaction?.transaction_data || {}
+
+    console.log(`[PIX-MP] Payment created for ${company?.name}: R$${totalPrice} (${months} months) — MP ID: ${result.id}`)
+
+    res.json({
+      payment_id: result.id,
+      qr_code: txData.qr_code || '',           // copia e cola
+      qr_code_base64: txData.qr_code_base64 || '', // QR code image
+      ticket_url: txData.ticket_url || '',       // fallback URL
+      amount: totalPrice,
+      expires_at: result.date_of_expiration || null,
+    })
+  } catch (err) {
+    console.error('PIX payment error:', err)
+    res.status(500).json({ error: 'Erro ao gerar PIX: ' + (err.message || 'erro desconhecido') })
   }
-
-  const sub = get(
-    'SELECT s.*, p.name as plan_name, p.price as plan_price, p.discount_3m, p.discount_6m, p.discount_12m FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
-    [req.user.company_id]
-  )
-  if (!sub) return res.status(400).json({ error: 'Nenhuma assinatura encontrada' })
-
-  // Check if there's already a pending PIX payment
-  const existingPending = get(
-    "SELECT id FROM subscription_payments WHERE company_id = ? AND payment_method = 'pix' AND status = 'pending'",
-    [req.user.company_id]
-  )
-  if (existingPending) {
-    return res.status(400).json({ error: 'Você já tem um pagamento PIX pendente de confirmação. Aguarde a aprovação do administrador.' })
-  }
-
-  // Calculate price with per-plan discount
-  const basePrice = sub.plan_price || 97.90
-  let discountPct = 0
-  if (months === 3) discountPct = sub.discount_3m || 0
-  else if (months === 6) discountPct = sub.discount_6m || 0
-  else if (months === 12) discountPct = sub.discount_12m || 0
-  const pricePerMonth = basePrice * (1 - discountPct / 100)
-  const totalPrice = Math.round(pricePerMonth * months * 100) / 100
-
-  const company = get('SELECT name FROM companies WHERE id = ?', [req.user.company_id])
-  const user = get('SELECT name FROM users WHERE id = ?', [req.user.id])
-
-  // Create pending payment record
-  run(
-    'INSERT INTO subscription_payments (subscription_id, company_id, amount, status, payment_method, notes) VALUES (?, ?, ?, ?, ?, ?)',
-    [sub.id, req.user.company_id, totalPrice, 'pending', 'pix',
-     JSON.stringify({ months, discount_pct: discountPct, user_name: user?.name, company_name: company?.name })]
-  )
-
-  console.log(`[PIX] Payment request from ${company?.name}: R$${totalPrice} (${months} months)`)
-
-  res.json({ success: true, message: 'Pagamento PIX registrado. Aguarde a confirmação do administrador.' })
 })
 
-// Admin: approve a pending PIX payment
-router.put('/admin/payments/:id/approve', authMiddleware, requireRole('admin'), (req, res) => {
-  const paymentId = parseInt(req.params.id)
-  const payment = get('SELECT * FROM subscription_payments WHERE id = ?', [paymentId])
-  if (!payment) return res.status(404).json({ error: 'Pagamento não encontrado' })
-  if (payment.status === 'approved') return res.status(400).json({ error: 'Pagamento já aprovado' })
-
-  // Parse notes to get months
-  let months = 1
+// Check PIX payment status
+router.get('/payment/pix/:id/status', authMiddleware, async (req, res) => {
   try {
-    const notes = JSON.parse(payment.notes || '{}')
-    months = notes.months || 1
-  } catch {}
+    const client = getMPClient()
+    if (!client) return res.status(500).json({ error: 'Mercado Pago não configurado.' })
 
-  // Mark payment as approved
-  run(
-    'UPDATE subscription_payments SET status = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ['approved', paymentId]
-  )
+    const payment = new MPPayment(client)
+    const result = await payment.get({ id: req.params.id })
 
-  // Stack months: extend from current_period_end if active, or from now
-  const currentSub = get('SELECT * FROM subscriptions WHERE id = ?', [payment.subscription_id])
-  let startFrom = new Date()
-  if (currentSub && currentSub.status === 'active' && currentSub.current_period_end) {
-    const existingEnd = new Date(currentSub.current_period_end)
-    if (existingEnd > startFrom) startFrom = existingEnd
+    res.json({
+      status: result.status, // pending, approved, rejected, cancelled
+      status_detail: result.status_detail,
+    })
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao verificar status' })
   }
-
-  const newEnd = new Date(startFrom.getTime() + months * 30 * 24 * 60 * 60 * 1000).toISOString()
-  const periodStart = currentSub?.status === 'active' ? currentSub.current_period_start : new Date().toISOString()
-
-  run(
-    'UPDATE subscriptions SET status = ?, current_period_start = ?, current_period_end = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ['active', periodStart, newEnd, payment.subscription_id]
-  )
-
-  const company = get('SELECT name FROM companies WHERE id = ?', [payment.company_id])
-  console.log(`[PIX] Payment approved for ${company?.name}: R$${payment.amount} (+${months} months, until ${newEnd})`)
-
-  res.json({ success: true })
 })
 
 export default router

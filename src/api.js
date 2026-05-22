@@ -171,7 +171,8 @@ const api = {
   payment: {
     config: () => request('/payment/config'),
     createPreference: (months) => request('/payment/create-preference', { method: 'POST', body: JSON.stringify({ months }) }),
-    pix: (months) => request('/payment/pix', { method: 'POST', body: JSON.stringify({ months }) }),
+    createPix: (months) => request('/payment/pix', { method: 'POST', body: JSON.stringify({ months }) }),
+    pixStatus: (id) => request(`/payment/pix/${id}/status`),
     status: () => request('/payment/status'),
   },
 
