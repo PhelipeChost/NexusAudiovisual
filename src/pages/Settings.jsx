@@ -167,10 +167,6 @@ function SubscriptionSettings() {
   const [paymentMsg, setPaymentMsg] = useState('')
   const [selectedMonths, setSelectedMonths] = useState(1)
   const [payMethod, setPayMethod] = useState('mercadopago') // 'mercadopago' or 'pix'
-  const [pixData, setPixData] = useState(null) // QR code data from MP
-  const [pixCopied, setPixCopied] = useState(false)
-  const [pixPolling, setPixPolling] = useState(false)
-  const [pixCpf, setPixCpf] = useState('')
 
   useEffect(() => {
     loadAll()
@@ -548,200 +544,50 @@ function SubscriptionSettings() {
             </div>
           )}
 
-          {/* PIX payment flow (via Mercado Pago) */}
+          {/* PIX payment flow (via Mercado Pago Checkout) */}
           {selectedTier && payMethod === 'pix' && config?.pixConfigured && (
-            <div style={{
-              ...panelStyle, padding: 20,
-              border: '1px solid rgba(50, 188, 173, 0.3)',
-              background: 'rgba(50, 188, 173, 0.06)',
-            }}>
-              {!pixData ? (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <div>
-                      <div style={{ fontSize: 14, color: theme.colors.text, fontWeight: 500 }}>
-                        {selectedTier.months === 1 ? '1 mes' : `${selectedTier.months} meses`} de Nexus {sub.plan_name || 'Profissional'}
-                      </div>
-                      {selectedTier.savings > 0 && (
-                        <div style={{ fontSize: 12, color: theme.colors.mint, marginTop: 2 }}>
-                          Economia de R${selectedTier.savings.toFixed(0)} ({selectedTier.discountPct}% off)
-                        </div>
-                      )}
-                    </div>
-                    <div className="display tnum" style={{ fontSize: 28, color: '#32BCAD' }}>
-                      R${selectedTier.total.toFixed(2).replace('.', ',')}
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: 14 }}>
-                    <label className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>CPF do pagador</label>
-                    <input
-                      type="text"
-                      value={pixCpf}
-                      onChange={e => {
-                        const v = e.target.value.replace(/\D/g, '').slice(0, 11)
-                        const formatted = v.length > 9
-                          ? v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4')
-                          : v.length > 6
-                          ? v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3')
-                          : v.length > 3
-                          ? v.replace(/(\d{3})(\d{1,3})/, '$1.$2')
-                          : v
-                        setPixCpf(formatted)
-                      }}
-                      placeholder="000.000.000-00"
-                      style={{ ...inputStyle, width: '100%', fontFamily: theme.fonts.mono, fontSize: 13 }}
-                    />
-                    <div style={{ fontSize: 11, color: theme.colors.textFaint, marginTop: 4 }}>
-                      Obrigatorio pelo Mercado Pago para pagamentos PIX
-                    </div>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      const cpfClean = pixCpf.replace(/\D/g, '')
-                      if (cpfClean.length !== 11) {
-                        setPaymentMsg('Informe um CPF valido (11 digitos)')
-                        return
-                      }
-                      setPaying(true)
-                      setPaymentMsg('')
-                      try {
-                        const result = await api.payment.createPix(selectedMonths, cpfClean)
-                        setPixData(result)
-                        // Start polling for payment confirmation
-                        setPixPolling(true)
-                        const pollInterval = setInterval(async () => {
-                          try {
-                            const st = await api.payment.pixStatus(result.payment_id)
-                            if (st.status === 'approved') {
-                              clearInterval(pollInterval)
-                              setPixPolling(false)
-                              setPixData(null)
-                              setPaymentMsg('Pagamento PIX aprovado! Sua assinatura foi ativada.')
-                              loadAll()
-                            } else if (st.status === 'rejected' || st.status === 'cancelled') {
-                              clearInterval(pollInterval)
-                              setPixPolling(false)
-                              setPixData(null)
-                              setPaymentMsg('Pagamento PIX cancelado ou rejeitado. Tente novamente.')
-                            }
-                          } catch {}
-                        }, 5000)
-                        // Stop polling after 30 min
-                        setTimeout(() => { clearInterval(pollInterval); setPixPolling(false) }, 30 * 60 * 1000)
-                      } catch (err) {
-                        setPaymentMsg(err.message || 'Erro ao gerar PIX')
-                      } finally { setPaying(false) }
-                    }}
-                    disabled={paying || pixCpf.replace(/\D/g, '').length !== 11}
-                    style={{
-                      ...btnPrimary,
-                      justifyContent: 'center', width: '100%',
-                      padding: '14px 20px', fontSize: 15,
-                      background: '#32BCAD',
-                      opacity: (paying || pixCpf.replace(/\D/g, '').length !== 11) ? 0.6 : 1,
-                      cursor: paying ? 'wait' : 'pointer',
-                    }}
-                    onMouseOver={e => { if (!paying && pixCpf.replace(/\D/g, '').length === 11) e.target.style.background = '#2aa89a' }}
-                    onMouseOut={e => e.target.style.background = '#32BCAD'}
-                  >
-                    {paying ? 'Gerando QR Code...' : `Gerar PIX — R$${selectedTier.total.toFixed(2).replace('.', ',')}`}
-                  </button>
-                </>
-              ) : (
-                <>
-                  {/* QR Code display */}
-                  <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                    <div className="eyebrow" style={{ marginBottom: 12, color: '#32BCAD' }}>
-                      Escaneie o QR Code ou copie o codigo PIX
-                    </div>
-                    {pixData.qr_code_base64 && (
-                      <div style={{
-                        display: 'inline-block', padding: 16, borderRadius: 16,
-                        background: '#fff', marginBottom: 12,
-                      }}>
-                        <img
-                          src={`data:image/png;base64,${pixData.qr_code_base64}`}
-                          alt="QR Code PIX"
-                          style={{ width: 220, height: 220, display: 'block' }}
-                        />
-                      </div>
-                    )}
-                    <div className="display tnum" style={{ fontSize: 28, color: '#32BCAD', marginBottom: 4 }}>
-                      R${parseFloat(pixData.amount).toFixed(2).replace('.', ',')}
-                    </div>
-                    <div style={{ fontSize: 12, color: theme.colors.textMuted }}>
-                      {selectedTier.months === 1 ? '1 mes' : `${selectedTier.months} meses`} de Nexus {sub.plan_name || 'Profissional'}
-                    </div>
-                  </div>
-
-                  {/* Copia e cola */}
-                  {pixData.qr_code && (
-                    <div style={{
-                      padding: 14, borderRadius: 10,
-                      background: theme.colors.bg,
-                      border: `1px solid ${theme.colors.border}`,
-                      marginBottom: 14,
-                    }}>
-                      <div className="eyebrow" style={{ marginBottom: 6 }}>PIX Copia e Cola</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <code style={{
-                          flex: 1, fontSize: 11, color: theme.colors.textSecondary,
-                          fontFamily: theme.fonts.mono, wordBreak: 'break-all',
-                          maxHeight: 60, overflow: 'hidden',
-                        }}>
-                          {pixData.qr_code}
-                        </code>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(pixData.qr_code)
-                            setPixCopied(true)
-                            setTimeout(() => setPixCopied(false), 2000)
-                          }}
-                          style={{
-                            ...btnSoft,
-                            padding: '8px 16px', fontSize: 12, flexShrink: 0,
-                            color: pixCopied ? theme.colors.mint : theme.colors.primary,
-                            borderColor: pixCopied ? 'rgba(0,210,150,0.3)' : undefined,
-                          }}
-                        >
-                          {pixCopied ? '✓ Copiado!' : 'Copiar'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Status */}
-                  <div style={{
-                    padding: '12px 16px', borderRadius: 10,
-                    background: pixPolling ? theme.colors.warmMuted : theme.colors.bgSecondary,
-                    border: pixPolling ? '1px solid rgba(255,138,107,0.2)' : `1px solid ${theme.colors.border}`,
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    fontSize: 13, color: pixPolling ? theme.colors.warm : theme.colors.textMuted,
-                  }}>
-                    {pixPolling && (
-                      <div style={{
-                        width: 14, height: 14, border: '2px solid rgba(255,138,107,0.3)',
-                        borderTopColor: theme.colors.warm, borderRadius: '50%',
-                        animation: 'spin 0.8s linear infinite',
-                      }} />
-                    )}
-                    {pixPolling
-                      ? 'Aguardando confirmacao do pagamento...'
-                      : 'QR Code gerado. Escaneie com o app do seu banco.'}
-                  </div>
-
-                  {/* New PIX button */}
-                  <button
-                    onClick={() => { setPixData(null); setPixPolling(false) }}
-                    style={{
-                      ...btnSoft, width: '100%', justifyContent: 'center',
-                      marginTop: 12, padding: '10px', fontSize: 12,
-                    }}
-                  >
-                    Gerar novo QR Code
-                  </button>
-                </>
-              )}
+            <div style={{ ...panelStyle, padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: theme.colors.textSecondary }}>
+                  {selectedTier.months === 1 ? '1 mes' : `${selectedTier.months} meses`}
+                  {selectedTier.discountPct > 0 && <span style={{ color: theme.colors.mint }}> (-{selectedTier.discountPct}%)</span>}
+                </div>
+                <div className="display tnum" style={{ fontSize: 24, color: '#32BCAD' }}>
+                  R${selectedTier.total.toFixed(2).replace('.', ',')}
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  setPaying(true)
+                  setPaymentMsg('')
+                  try {
+                    const result = await api.payment.createPix(selectedMonths)
+                    if (result.init_point) {
+                      window.location.href = result.init_point
+                    } else {
+                      setPaymentMsg('Erro: link de pagamento nao gerado')
+                    }
+                  } catch (err) {
+                    setPaymentMsg(err.message || 'Erro ao gerar pagamento PIX')
+                  } finally { setPaying(false) }
+                }}
+                disabled={paying}
+                style={{
+                  ...btnPrimary,
+                  padding: '14px 28px', fontSize: 14,
+                  background: '#32BCAD',
+                  opacity: paying ? 0.6 : 1,
+                  cursor: paying ? 'wait' : 'pointer',
+                }}
+                onMouseOver={e => { if (!paying) e.target.style.background = '#2aa89a' }}
+                onMouseOut={e => e.target.style.background = '#32BCAD'}
+              >
+                {paying
+                  ? 'Redirecionando...'
+                  : isPending
+                    ? `Ativar conta — R$${selectedTier.total.toFixed(0)} via PIX`
+                    : `Pagar R$${selectedTier.total.toFixed(0)} via PIX`}
+              </button>
             </div>
           )}
 

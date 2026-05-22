@@ -2421,23 +2421,19 @@ router.get('/payment/status', authMiddleware, (req, res) => {
   })
 })
 
-// ============ PIX PAYMENT (via Mercado Pago) ============
+// ============ PIX PAYMENT (via Mercado Pago Checkout Pro) ============
 
-// Create a PIX payment via Mercado Pago API — returns QR code
+// Create a Preference restricted to PIX only — redirects to MP page with QR code
 router.post('/payment/pix', authMiddleware, async (req, res) => {
   try {
     const client = getMPClient()
     if (!client) return res.status(500).json({ error: 'Mercado Pago não configurado.' })
 
-    const { months = 1, cpf } = req.body
+    const { months = 1 } = req.body
     const validMonths = [1, 3, 6, 12]
     if (!validMonths.includes(months)) {
       return res.status(400).json({ error: 'Período inválido' })
     }
-    if (!cpf || cpf.replace(/\D/g, '').length !== 11) {
-      return res.status(400).json({ error: 'CPF do pagador é obrigatório para PIX' })
-    }
-    const cpfClean = cpf.replace(/\D/g, '')
 
     const sub = get(
       'SELECT s.*, p.name as plan_name, p.price as plan_price, p.discount_3m, p.discount_6m, p.discount_12m FROM subscriptions s LEFT JOIN plans p ON p.id = s.plan_id WHERE s.company_id = ?',
@@ -2461,22 +2457,33 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
     const appUrlRow = get("SELECT value FROM platform_settings WHERE key = 'app_url'")
     const baseUrl = appUrlRow?.value || process.env.APP_URL || 'https://reinonexusideal.com.br'
 
-    const periodLabel = months === 1 ? '1 mes' : `${months} meses`
+    const periodLabel = months === 1 ? 'Mensal' : `${months} meses`
 
-    const payment = new MPPayment(client)
-    const result = await payment.create({
+    const preference = new Preference(client)
+    const result = await preference.create({
       body: {
-        transaction_amount: totalPrice,
-        description: `Nexus Audiovisual - ${sub.plan_name || 'Profissional'} (${periodLabel})`,
-        payment_method_id: 'pix',
+        items: [
+          {
+            id: `nexus-pix-${sub.plan_id}-${months}m`,
+            title: `Nexus Audiovisual - ${sub.plan_name || 'Profissional'} (${periodLabel})`,
+            description: `${company.name} — ${months} ${months === 1 ? 'mes' : 'meses'} de assinatura`,
+            quantity: 1,
+            unit_price: totalPrice,
+            currency_id: 'BRL',
+          }
+        ],
         payer: {
           email: user.email,
-          first_name: (user.name || '').split(' ')[0] || 'Cliente',
-          last_name: (user.name || '').split(' ').slice(1).join(' ') || 'Nexus',
-          identification: {
-            type: 'CPF',
-            number: cpfClean,
-          },
+          name: user.name,
+        },
+        payment_methods: {
+          excluded_payment_types: [
+            { id: 'credit_card' },
+            { id: 'debit_card' },
+            { id: 'ticket' },
+            { id: 'atm' },
+          ],
+          installments: 1,
         },
         external_reference: JSON.stringify({
           company_id: req.user.company_id,
@@ -2485,44 +2492,26 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
           months,
           discount_pct: discountPct,
         }),
+        back_urls: {
+          success: `${baseUrl}${basePath}/dashboard/settings?payment=success`,
+          failure: `${baseUrl}${basePath}/dashboard/settings?payment=failure`,
+          pending: `${baseUrl}${basePath}/dashboard/settings?payment=pending`,
+        },
+        auto_return: 'approved',
         notification_url: `${baseUrl}${basePath}/api/payment/webhook`,
       }
     })
 
-    // Extract PIX data from response
-    const txData = result.point_of_interaction?.transaction_data || {}
-
-    console.log(`[PIX-MP] Payment created for ${company?.name}: R$${totalPrice} (${months} months) — MP ID: ${result.id}`)
+    console.log(`[PIX-MP] Preference created for ${company?.name}: R$${totalPrice} (${months} months) — ID: ${result.id}`)
 
     res.json({
-      payment_id: result.id,
-      qr_code: txData.qr_code || '',           // copia e cola
-      qr_code_base64: txData.qr_code_base64 || '', // QR code image
-      ticket_url: txData.ticket_url || '',       // fallback URL
-      amount: totalPrice,
-      expires_at: result.date_of_expiration || null,
+      id: result.id,
+      init_point: result.init_point,
+      sandbox_init_point: result.sandbox_init_point,
     })
   } catch (err) {
-    console.error('PIX payment error:', err)
+    console.error('PIX preference error:', err)
     res.status(500).json({ error: 'Erro ao gerar PIX: ' + (err.message || 'erro desconhecido') })
-  }
-})
-
-// Check PIX payment status
-router.get('/payment/pix/:id/status', authMiddleware, async (req, res) => {
-  try {
-    const client = getMPClient()
-    if (!client) return res.status(500).json({ error: 'Mercado Pago não configurado.' })
-
-    const payment = new MPPayment(client)
-    const result = await payment.get({ id: req.params.id })
-
-    res.json({
-      status: result.status, // pending, approved, rejected, cancelled
-      status_detail: result.status_detail,
-    })
-  } catch (err) {
-    res.status(500).json({ error: 'Erro ao verificar status' })
   }
 })
 
