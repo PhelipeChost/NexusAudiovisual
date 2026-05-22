@@ -426,7 +426,9 @@ async function initDb() {
     if (tableSql && !tableSql.includes("'pending'")) {
       // Temporarily disable FK checks for migration
       db.run('PRAGMA foreign_keys = OFF')
-      db.run(`CREATE TABLE IF NOT EXISTS subscriptions_new (
+      // Clean up any leftover temp table from previous failed migration
+      try { db.run('DROP TABLE IF EXISTS subscriptions_new') } catch {}
+      db.run(`CREATE TABLE subscriptions_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         company_id INTEGER NOT NULL UNIQUE,
         plan_id INTEGER,
