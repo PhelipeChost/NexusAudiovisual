@@ -122,7 +122,7 @@ export default function Clients() {
       ) : view === 'grid' ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(312px, 1fr))', gap: 14 }}>
           {filtered.map(client => (
-            <ClientCard key={client.id} client={client} onClick={() => navigate(`/clients/${client.id}`)} />
+            <ClientCard key={client.id} client={client} onClick={() => navigate(`/dashboard/clients/${client.id}`)} />
           ))}
         </div>
       ) : (
@@ -140,7 +140,7 @@ export default function Clients() {
             </thead>
             <tbody>
               {filtered.map(c => (
-                <tr key={c.id} onClick={() => navigate(`/clients/${c.id}`)}
+                <tr key={c.id} onClick={() => navigate(`/dashboard/clients/${c.id}`)}
                   className="row-hover"
                   style={{ cursor: 'pointer', borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
                   <td style={{ padding: '12px 16px' }}>
