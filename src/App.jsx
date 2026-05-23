@@ -1,3 +1,4 @@
+import React, { useRef } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
@@ -18,21 +19,38 @@ import EditorReport from './pages/EditorReport'
 import AdminDashboard from './pages/AdminDashboard'
 import LandingPage from './pages/LandingPage'
 
+// ProtectedRoute — resilient to transient auth-state glitches during navigation.
+// Uses a ref to remember the last known user so a momentary undefined/null
+// during a React re-render never triggers a redirect.
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
+  const lastUserRef = useRef(user)
+
+  // Keep the ref updated whenever we have a valid user
+  if (user) lastUserRef.current = user
+
   if (loading) return null
-  // If token exists but user hasn't loaded yet (transient state), wait instead of redirecting
-  const hasToken = !!localStorage.getItem('nexus_token')
-  if (!user && hasToken) return null
-  if (!user) return <Navigate to="/" />
+
+  if (!user) {
+    // Token still in storage → auth is resolving, wait
+    if (localStorage.getItem('nexus_token')) return null
+    // We had a user before but token is gone → explicit logout happened
+    if (lastUserRef.current) {
+      lastUserRef.current = null
+      return <Navigate to="/" replace />
+    }
+    // Never authenticated → redirect to landing
+    return <Navigate to="/" replace />
+  }
+
   return children
 }
 
 function AdminRoute({ children }) {
   const { user, loading } = useAuth()
   if (loading) return null
-  if (!user) return <Navigate to="/" />
-  if (user.role !== 'admin') return <Navigate to="/dashboard" />
+  if (!user) return <Navigate to="/" replace />
+  if (user.role !== 'admin') return <Navigate to="/dashboard" replace />
   return children
 }
 
@@ -44,26 +62,25 @@ function RoleDashboard() {
   return <Dashboard />
 }
 
-export default function App() {
+// Login page — redirects to dashboard if already authenticated
+function LoginRoute() {
   const { user, loading } = useAuth()
+  if (loading) return null
+  return user ? <Navigate to="/dashboard" replace /> : <Login />
+}
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a0a0f' }}>
-        <div style={{ width: 40, height: 40, border: '3px solid #232340', borderTopColor: '#6c5ce7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-      </div>
-    )
-  }
-
+// Memoized route tree — prevents the entire route tree from re-rendering
+// when auth context changes (e.g. during navigation). Only React Router's
+// own location changes trigger re-evaluation of routes inside here.
+const AppRoutes = React.memo(function AppRoutes() {
   return (
     <Routes>
-      {/* Landing page — always accessible (even when logged in) */}
+      {/* Landing page — always accessible */}
       <Route path="/" element={<LandingPage />} />
-      <Route path="/landing" element={<Navigate to="/" />} />
+      <Route path="/landing" element={<Navigate to="/" replace />} />
 
       {/* Auth routes */}
-      <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
+      <Route path="/login" element={<LoginRoute />} />
       <Route path="/register" element={<Register />} />
       <Route path="/invite/:token" element={<Invite />} />
 
@@ -82,7 +99,22 @@ export default function App() {
       </Route>
 
       {/* Catch-all: go to landing */}
-      <Route path="*" element={<Navigate to="/" />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
+})
+
+export default function App() {
+  const { loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a0a0f' }}>
+        <div style={{ width: 40, height: 40, border: '3px solid #232340', borderTopColor: '#6c5ce7', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    )
+  }
+
+  return <AppRoutes />
 }
