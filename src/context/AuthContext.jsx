@@ -10,10 +10,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const token = localStorage.getItem('nexus_token')
     if (token) {
-      console.log('[Auth] Token found, calling /auth/me...')
       api.auth.me()
-        .then(u => { console.log('[Auth] /auth/me success:', u?.email, u?.role); setUser(u) })
-        .catch(err => { console.error('[Auth] /auth/me FAILED:', err.message); localStorage.removeItem('nexus_token') })
+        .then(setUser)
+        .catch(() => localStorage.removeItem('nexus_token'))
         .finally(() => setLoading(false))
     } else {
       setLoading(false)

@@ -20,12 +20,11 @@ import LandingPage from './pages/LandingPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
-  console.log('[ProtectedRoute] loading:', loading, 'user:', user?.email, 'role:', user?.role)
   if (loading) return null
-  if (!user) {
-    console.warn('[ProtectedRoute] No user, redirecting to /')
-    return <Navigate to="/" />
-  }
+  // If token exists but user hasn't loaded yet (transient state), wait instead of redirecting
+  const hasToken = !!localStorage.getItem('nexus_token')
+  if (!user && hasToken) return null
+  if (!user) return <Navigate to="/" />
   return children
 }
 
