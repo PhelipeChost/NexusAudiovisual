@@ -20,8 +20,13 @@ import LandingPage from './pages/LandingPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
+  console.log('[ProtectedRoute] loading:', loading, 'user:', user?.email, 'role:', user?.role)
   if (loading) return null
-  return user ? children : <Navigate to="/" />
+  if (!user) {
+    console.warn('[ProtectedRoute] No user, redirecting to /')
+    return <Navigate to="/" />
+  }
+  return children
 }
 
 function AdminRoute({ children }) {
