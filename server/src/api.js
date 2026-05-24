@@ -2183,6 +2183,164 @@ router.get('/lookup/cnpj/:cnpj', authMiddleware, async (req, res) => {
   }
 })
 
+// ============ CONTRACT SIGNATURE SYSTEM ============
+
+// Send contract for signature (gestor action)
+router.post('/contracts/:id/send-signature', authMiddleware, requireRole('gestor'), async (req, res) => {
+  const id = req.params.id
+  const { signer_email, signer_name } = req.body
+  if (!signer_email) return res.status(400).json({ error: 'Email do assinante obrigatorio' })
+
+  const contract = get('SELECT * FROM contracts WHERE id = ? AND company_id = ?', [id, req.user.company_id])
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+
+  // Generate unique signing token
+  const signToken = crypto.randomBytes(32).toString('hex')
+
+  // Generate document hash (SHA-256 of contract content)
+  const clauses = all('SELECT title, content, items_json, position FROM contract_clauses WHERE contract_id = ? ORDER BY position', [id])
+  const docContent = JSON.stringify({ contract, clauses })
+  const docHash = crypto.createHash('sha256').update(docContent).digest('hex')
+
+  // Update contract with signature status
+  run('UPDATE contracts SET signature_status = ?, sign_token = ?, document_hash = ? WHERE id = ?',
+    ['pending', signToken, docHash, id])
+
+  // Create signature record
+  run(`INSERT INTO contract_signatures (contract_id, signer_role, signer_name, signer_email)
+       VALUES (?, ?, ?, ?)`,
+    [id, 'contratante', signer_name || '', signer_email])
+
+  // Send email with signing link
+  try {
+    const { sendSignatureEmail } = await import('./email.js')
+    const baseUrl = process.env.APP_URL || 'https://reinonexus.com/audiovisual'
+    const signUrl = `${baseUrl}/#/assinar/${signToken}`
+    await sendSignatureEmail(signer_email, signer_name || 'Cliente', contract.title, signUrl)
+  } catch (err) {
+    console.error('Email error:', err)
+    // Don't fail — signature link still works
+  }
+
+  res.json({ success: true, sign_token: signToken })
+})
+
+// Get contract for signing (PUBLIC — no auth required)
+router.get('/contracts/sign/:token', (req, res) => {
+  const token = req.params.token
+  const contract = get('SELECT * FROM contracts WHERE sign_token = ?', [token])
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado ou link invalido' })
+  if (contract.signature_status === 'signed') return res.status(400).json({ error: 'Contrato ja assinado', already_signed: true })
+
+  const clauses = all('SELECT title, content, items_json, position FROM contract_clauses WHERE contract_id = ? ORDER BY position', [contract.id])
+  const signature = get('SELECT signer_name, signer_email, signed_at FROM contract_signatures WHERE contract_id = ? ORDER BY id DESC LIMIT 1', [contract.id])
+
+  res.json({
+    title: contract.title,
+    status: contract.signature_status,
+    contratante_tipo: contract.contratante_tipo,
+    contratante_nome: contract.contratante_nome,
+    contratante_cnpj: contract.contratante_cnpj,
+    contratante_cpf: contract.contratante_cpf,
+    contratante_endereco: contract.contratante_endereco,
+    contratado_tipo: contract.contratado_tipo,
+    contratado_nome: contract.contratado_nome,
+    contratado_cnpj: contract.contratado_cnpj,
+    contratado_cpf: contract.contratado_cpf,
+    contratado_endereco: contract.contratado_endereco,
+    payment_value: contract.payment_value,
+    payment_date: contract.payment_date,
+    payment_details: contract.payment_details,
+    city: contract.city,
+    contract_date: contract.contract_date,
+    start_date: contract.start_date,
+    end_date: contract.end_date,
+    monthly_videos: contract.monthly_videos,
+    clauses: clauses.map(cl => ({ ...cl, topics: cl.items_json ? JSON.parse(cl.items_json) : [] })),
+    signer_email: signature?.signer_email,
+    signer_name: signature?.signer_name,
+    document_hash: contract.document_hash,
+  })
+})
+
+// Send OTP for signature verification (PUBLIC)
+router.post('/contracts/sign/:token/send-otp', async (req, res) => {
+  const token = req.params.token
+  const contract = get('SELECT id, signature_status, sign_token FROM contracts WHERE sign_token = ?', [token])
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+  if (contract.signature_status === 'signed') return res.status(400).json({ error: 'Contrato ja assinado' })
+
+  const signature = get('SELECT * FROM contract_signatures WHERE contract_id = ? ORDER BY id DESC LIMIT 1', [contract.id])
+  if (!signature) return res.status(400).json({ error: 'Nenhuma assinatura pendente' })
+
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+  run('UPDATE contract_signatures SET otp_code = ?, otp_sent_at = CURRENT_TIMESTAMP WHERE id = ?', [otp, signature.id])
+
+  // Send OTP via email
+  try {
+    const { sendOTPEmail } = await import('./email.js')
+    await sendOTPEmail(signature.signer_email, otp)
+    res.json({ success: true, email_sent_to: signature.signer_email.replace(/(.{2})(.*)(@.*)/, '$1***$3') })
+  } catch (err) {
+    console.error('OTP email error:', err)
+    res.status(500).json({ error: 'Erro ao enviar codigo. Tente novamente.' })
+  }
+})
+
+// Verify OTP and register signature (PUBLIC)
+router.post('/contracts/sign/:token/verify', (req, res) => {
+  const token = req.params.token
+  const { otp, signer_name, signer_cpf, signature_image, geolocation } = req.body
+
+  const contract = get('SELECT id, signature_status, document_hash FROM contracts WHERE sign_token = ?', [token])
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+  if (contract.signature_status === 'signed') return res.status(400).json({ error: 'Contrato ja assinado' })
+
+  const signature = get('SELECT * FROM contract_signatures WHERE contract_id = ? ORDER BY id DESC LIMIT 1', [contract.id])
+  if (!signature) return res.status(400).json({ error: 'Nenhuma assinatura pendente' })
+
+  // Verify OTP
+  if (!signature.otp_code || signature.otp_code !== otp) {
+    return res.status(400).json({ error: 'Codigo invalido. Tente novamente.' })
+  }
+
+  // Check OTP expiry (10 minutes)
+  const otpSentAt = new Date(signature.otp_sent_at + 'Z')
+  const now = new Date()
+  if ((now - otpSentAt) > 10 * 60 * 1000) {
+    return res.status(400).json({ error: 'Codigo expirado. Solicite um novo.' })
+  }
+
+  // Get IP and user agent
+  const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'
+  const userAgent = req.headers['user-agent'] || 'unknown'
+
+  // Register signature
+  run(`UPDATE contract_signatures SET
+       signer_name = ?, signer_cpf = ?, ip_address = ?, user_agent = ?,
+       signed_at = CURRENT_TIMESTAMP, document_hash = ?, signature_image = ?,
+       geolocation = ?, otp_code = NULL
+       WHERE id = ?`,
+    [signer_name || signature.signer_name, signer_cpf || '', ip, userAgent,
+     contract.document_hash, signature_image || null, geolocation || null, signature.id])
+
+  // Update contract status
+  run('UPDATE contracts SET signature_status = ? WHERE id = ?', ['signed', contract.id])
+
+  res.json({ success: true, signed_at: new Date().toISOString() })
+})
+
+// Get signature details (gestor)
+router.get('/contracts/:id/signatures', authMiddleware, requireRole('gestor'), (req, res) => {
+  const id = req.params.id
+  const contract = get('SELECT id FROM contracts WHERE id = ? AND company_id = ?', [id, req.user.company_id])
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+
+  const signatures = all('SELECT * FROM contract_signatures WHERE contract_id = ? ORDER BY signed_at DESC', [id])
+  res.json(signatures)
+})
+
 // ============ COMMENTS (accessible by editor and client too) ============
 
 router.get('/orders/:id/comments', authMiddleware, (req, res) => {

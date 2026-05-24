@@ -90,6 +90,14 @@ const api = {
     create: (data) => request('/contracts', { method: 'POST', body: JSON.stringify(data) }),
     update: (id, data) => request(`/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id) => request(`/contracts/${id}`, { method: 'DELETE' }),
+    sendSignature: (id, data) => request(`/contracts/${id}/send-signature`, { method: 'POST', body: JSON.stringify(data) }),
+    getSignatures: (id) => request(`/contracts/${id}/signatures`),
+    // Public (no auth)
+    getForSigning: (token) => fetch(`${BASE_URL}/contracts/sign/${token}`).then(r => r.json()),
+    sendOTP: (token) => fetch(`${BASE_URL}/contracts/sign/${token}/send-otp`, { method: 'POST' }).then(r => r.json()),
+    verifySignature: (token, data) => fetch(`${BASE_URL}/contracts/sign/${token}/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    }).then(r => r.json()),
   },
 
   lookup: {

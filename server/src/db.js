@@ -505,6 +505,31 @@ async function initDb() {
   // Sub-items for clauses (a, b, c...)
   try { db.run("ALTER TABLE contract_clauses ADD COLUMN items_json TEXT DEFAULT '[]'") } catch {}
 
+  // ============ CONTRACT SIGNATURE SYSTEM ============
+  try { db.run("ALTER TABLE contracts ADD COLUMN signature_status TEXT DEFAULT 'draft'") } catch {} // draft, pending, signed
+  try { db.run("ALTER TABLE contracts ADD COLUMN sign_token TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN document_hash TEXT") } catch {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS contract_signatures (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contract_id INTEGER NOT NULL,
+      signer_role TEXT NOT NULL,
+      signer_name TEXT,
+      signer_cpf TEXT,
+      signer_email TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      otp_code TEXT,
+      otp_sent_at DATETIME,
+      signed_at DATETIME,
+      document_hash TEXT,
+      signature_image TEXT,
+      geolocation TEXT,
+      FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
+    )
+  `)
+
   // ============ CLIENT ORDER REQUESTS ============
   // Uses orders table with source field
   try { db.run("ALTER TABLE orders ADD COLUMN source TEXT DEFAULT 'gestor'") } catch {}

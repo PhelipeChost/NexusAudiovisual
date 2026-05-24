@@ -19,6 +19,7 @@ import EditorReport from './pages/EditorReport'
 import EditorFinancial from './pages/EditorFinancial'
 import EditorMyReport from './pages/EditorMyReport'
 import Contracts from './pages/Contracts'
+import ContractSign from './pages/ContractSign'
 import AdminDashboard from './pages/AdminDashboard'
 import LandingPage from './pages/LandingPage'
 
@@ -86,6 +87,7 @@ const AppRoutes = React.memo(function AppRoutes() {
       <Route path="/login" element={<LoginRoute />} />
       <Route path="/register" element={<Register />} />
       <Route path="/invite/:token" element={<Invite />} />
+      <Route path="/assinar/:token" element={<ContractSign />} />
 
       {/* Protected app routes */}
       <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>

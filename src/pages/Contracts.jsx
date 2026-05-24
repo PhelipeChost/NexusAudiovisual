@@ -1,5 +1,5 @@
 // src/pages/Contracts.jsx — gestor contract management with clause builder (inspired by real contract PDF)
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import api from '../api'
 import theme from '../styles/theme'
 import Modal from '../components/Modal'
@@ -67,6 +67,10 @@ export default function Contracts() {
   const [detailContract, setDetailContract] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [previewContract, setPreviewContract] = useState(null)
+  const [signModal, setSignModal] = useState(null) // contract to send for signature
+  const [signEmail, setSignEmail] = useState('')
+  const [signName, setSignName] = useState('')
+  const [signSending, setSignSending] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -167,6 +171,16 @@ export default function Contracts() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {c.signature_status === 'signed' && (
+                    <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 4, background: 'rgba(124,224,184,0.12)', color: theme.colors.mint, fontWeight: 600 }}>
+                      ✓ assinado
+                    </span>
+                  )}
+                  {c.signature_status === 'pending' && (
+                    <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 4, background: 'rgba(167,139,250,0.12)', color: theme.colors.primary, fontWeight: 600 }}>
+                      ⏳ pendente
+                    </span>
+                  )}
                   {c.monthly_videos > 0 && (
                     <span className="mono tnum" style={{ fontSize: 12, color: theme.colors.primary }}>
                       {c.monthly_videos} videos/mes
@@ -210,6 +224,7 @@ export default function Contracts() {
             onEdit={() => startEdit(detailContract)}
             onDelete={() => handleDelete(detailContract.id)}
             onPreview={() => { setPreviewContract(detailContract); setDetailContract(null) }}
+            onSendSignature={(c) => { setSignModal(c); setSignEmail(''); setSignName(c.contratante_nome || ''); setDetailContract(null) }}
           />
         )}
       </Modal>
@@ -217,6 +232,46 @@ export default function Contracts() {
       {/* Document preview modal */}
       <Modal open={!!previewContract} onClose={() => setPreviewContract(null)} width={820}>
         {previewContract && <ContractDocPreview contract={previewContract} onClose={() => setPreviewContract(null)} />}
+      </Modal>
+
+      {/* Send for signature modal */}
+      <Modal open={!!signModal} onClose={() => setSignModal(null)} title="Enviar para assinatura" width={440}>
+        {signModal && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 13, color: theme.colors.textMuted }}>
+              O contratante receberá um email com link para revisar e assinar digitalmente o contrato <strong style={{ color: theme.colors.text }}>{signModal.title}</strong>.
+            </div>
+            <Field label="Nome do assinante">
+              <input value={signName} onChange={e => setSignName(e.target.value)}
+                style={inputStyle} placeholder="Nome completo do contratante" />
+            </Field>
+            <Field label="Email do assinante">
+              <input type="email" value={signEmail} onChange={e => setSignEmail(e.target.value)}
+                style={inputStyle} placeholder="email@empresa.com" />
+            </Field>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
+              <button onClick={() => setSignModal(null)} style={btnGhost}>Cancelar</button>
+              <button
+                disabled={signSending || !signEmail.trim()}
+                onClick={async () => {
+                  setSignSending(true)
+                  try {
+                    await api.contracts.sendSignature(signModal.id, { signer_email: signEmail, signer_name: signName })
+                    alert('Link de assinatura enviado com sucesso!')
+                    setSignModal(null)
+                    load()
+                  } catch (err) { alert(err.message) } finally { setSignSending(false) }
+                }}
+                style={{ ...btnPrimary, opacity: (signSending || !signEmail.trim()) ? 0.6 : 1 }}
+              >
+                {signSending ? 'Enviando...' : 'Enviar link'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: theme.colors.textFaint, borderTop: `1px solid ${theme.colors.border}`, paddingTop: 10 }}>
+              O assinante precisará confirmar com código OTP enviado por email. A assinatura registra IP, data/hora, hash do documento e geolocalização.
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )
@@ -866,7 +921,7 @@ function PartySection({ label, color, prefix, form, setForm, cnpjLoading, setCnp
 /* ============================================================
    ContractDetail — summary view with actions
    ============================================================ */
-function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
+function ContractDetail({ contract, loading, onEdit, onDelete, onPreview, onSendSignature }) {
   if (loading) return <Spinner />
 
   const clauses = contract.clauses || []
@@ -987,11 +1042,29 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
         </div>
       )}
 
+      {/* Signature status */}
+      {contract.signature_status && contract.signature_status !== 'draft' && (
+        <div style={{
+          padding: 12, borderRadius: 8,
+          background: contract.signature_status === 'signed' ? 'rgba(124,224,184,0.1)' : 'rgba(167,139,250,0.1)',
+          border: `1px solid ${contract.signature_status === 'signed' ? theme.colors.mint : theme.colors.primary}`,
+        }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: contract.signature_status === 'signed' ? theme.colors.mint : theme.colors.primary }}>
+            {contract.signature_status === 'signed' ? '✅ Contrato assinado digitalmente' : '⏳ Aguardando assinatura'}
+          </div>
+        </div>
+      )}
+
       {/* Actions */}
       <div style={{ display: 'flex', gap: 10, paddingTop: 10, borderTop: `1px solid ${theme.colors.border}`, flexWrap: 'wrap' }}>
         <button onClick={onPreview} style={btnPrimary}>
-          <Icon name="eye" size={13} /> Visualizar documento
+          <Icon name="eye" size={13} /> Visualizar / PDF
         </button>
+        {contract.signature_status !== 'signed' && (
+          <button onClick={() => onSendSignature && onSendSignature(contract)} style={{ ...btnSoft, background: 'rgba(167,139,250,0.12)', color: theme.colors.primary, borderColor: theme.colors.primary }}>
+            <Icon name="link" size={13} /> Enviar para assinatura
+          </button>
+        )}
         <button onClick={onEdit} style={btnSoft}>
           <Icon name="edit" size={13} /> Editar
         </button>
@@ -1004,10 +1077,12 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
 }
 
 /* ============================================================
-   ContractDocPreview — formatted document preview (print-style)
+   ContractDocPreview — formatted document preview with PDF download (all pages)
    ============================================================ */
 function ContractDocPreview({ contract, onClose }) {
   const clauses = contract.clauses || []
+  const docRef = useRef(null)
+  const [generating, setGenerating] = useState(false)
 
   function formatPartyDoc(prefix) {
     const tipo = contract[`${prefix}_tipo`] || 'pf'
@@ -1040,6 +1115,61 @@ function ContractDocPreview({ contract, onClose }) {
     return 'pessoa fisica'
   }
 
+  async function downloadPDF() {
+    if (!docRef.current) return
+    setGenerating(true)
+    try {
+      const html2canvas = (await import('html2canvas')).default
+      const { jsPDF } = await import('jspdf')
+
+      // Temporarily remove max-height and overflow to capture full document
+      const el = docRef.current
+      const originalStyle = el.style.cssText
+      el.style.maxHeight = 'none'
+      el.style.overflow = 'visible'
+
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      })
+
+      // Restore original style
+      el.style.cssText = originalStyle
+
+      // Calculate PDF pages (A4: 210mm x 297mm)
+      const imgWidth = 210
+      const pageHeight = 297
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      const pdf = new jsPDF('p', 'mm', 'a4')
+
+      let heightLeft = imgHeight
+      let position = 0
+
+      // First page
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+
+      // Add more pages if content overflows
+      while (heightLeft > 0) {
+        position = position - pageHeight
+        pdf.addPage()
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
+        heightLeft -= pageHeight
+      }
+
+      // Download
+      const filename = (contract.title || 'contrato').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()
+      pdf.save(`${filename}.pdf`)
+    } catch (err) {
+      console.error('PDF generation error:', err)
+      alert('Erro ao gerar PDF. Tente novamente.')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   const docStyle = {
     background: '#fff', color: '#111', padding: '48px 56px',
     fontFamily: "'Inter', 'Times New Roman', serif",
@@ -1049,7 +1179,7 @@ function ContractDocPreview({ contract, onClose }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={docStyle}>
+      <div ref={docRef} style={docStyle}>
         {/* Title */}
         <h1 style={{ textAlign: 'center', fontSize: 16, fontWeight: 700, marginBottom: 28, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
           {contract.title || 'CONTRATO DE PRESTACAO DE SERVICOS PROFISSIONAIS'}
@@ -1146,12 +1276,25 @@ function ContractDocPreview({ contract, onClose }) {
             </div>
           </div>
         </div>
+
+        {/* Digital signature info (if signed) */}
+        {contract.signature_status === 'signed' && (
+          <div style={{ marginTop: 40, padding: '16px 20px', border: '1px solid #ccc', borderRadius: 6, background: '#f8f9fa', fontSize: 11, color: '#555' }}>
+            <div style={{ fontWeight: 700, marginBottom: 6, color: '#333' }}>ASSINATURA DIGITAL</div>
+            <div>Este documento foi assinado digitalmente via plataforma Audiovisual Nexus.</div>
+            {contract.document_hash && (
+              <div style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 9.5, wordBreak: 'break-all' }}>
+                Hash SHA-256: {contract.document_hash}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Actions below preview */}
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-        <button onClick={() => window.print()} style={btnSoft}>
-          <Icon name="link" size={13} /> Imprimir / PDF
+        <button onClick={downloadPDF} disabled={generating} style={{ ...btnPrimary, opacity: generating ? 0.6 : 1 }}>
+          <Icon name="link" size={13} /> {generating ? 'Gerando PDF...' : 'Baixar PDF'}
         </button>
         <button onClick={onClose} style={btnGhost}>Fechar</button>
       </div>
