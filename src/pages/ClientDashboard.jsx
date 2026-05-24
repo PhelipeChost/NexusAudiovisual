@@ -1,5 +1,5 @@
 // src/pages/ClientDashboard.jsx — visao do cliente: kanban read-only + tabela + financeiro + portal de solicitacao
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import api from '../api'
 import { useAuth } from '../context/AuthContext'
 import theme from '../styles/theme'
@@ -151,6 +151,7 @@ export default function ClientDashboard() {
               { id: 'map', label: 'Mapa' },
               { id: 'table', label: 'Planilha' },
               { id: 'financial', label: 'Financeiro' },
+              { id: 'contract', label: 'Contrato' },
               { id: 'request', label: 'Solicitar' },
             ].map(t => (
               <button key={t.id} onClick={() => {
@@ -295,6 +296,13 @@ export default function ClientDashboard() {
                 </tfoot>
               </table>
             </div>
+          )}
+
+          {/* Contract tab — view and sign contract */}
+          {tab === 'contract' && (
+            <ClientContractTab contract={contract} onSigned={() => {
+              api.clientPortal.getContract().then(c => setContract(c)).catch(() => {})
+            }} />
           )}
 
           {/* Request tab — client order portal */}
@@ -929,6 +937,303 @@ function ClientOrderDetail({ order, onAction }) {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ============================================================
+   ClientContractTab — view full contract + sign from client portal
+   ============================================================ */
+function ClientContractTab({ contract, onSigned }) {
+  const [step, setStep] = useState('view') // view → sign → otp → done
+  const [signerName, setSignerName] = useState('')
+  const [signerCPF, setSignerCPF] = useState('')
+  const [cpfError, setCpfError] = useState('')
+  const [otpCode, setOtpCode] = useState('')
+  const [otpEmail, setOtpEmail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [signedAt, setSignedAt] = useState(null)
+  const canvasRef = React.useRef(null)
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [hasSignature, setHasSignature] = useState(false)
+
+  if (!contract || !contract.contract) {
+    return (
+      <div style={{ ...panelStyle, textAlign: 'center', padding: 48 }}>
+        <div style={{ fontSize: 14, color: theme.colors.textMuted }}>Nenhum contrato ativo vinculado a sua conta.</div>
+      </div>
+    )
+  }
+
+  const c = contract.contract
+  const clauses = c.clauses || []
+  const isSigned = c.signature_status === 'signed'
+
+  function validateCPF(cpf) {
+    cpf = cpf.replace(/\D/g, '')
+    if (cpf.length !== 11) return false
+    if (/^(\d)\1+$/.test(cpf)) return false
+    let sum = 0
+    for (let i = 0; i < 9; i++) sum += parseInt(cpf[i]) * (10 - i)
+    let d1 = 11 - (sum % 11); if (d1 >= 10) d1 = 0
+    if (parseInt(cpf[9]) !== d1) return false
+    sum = 0
+    for (let i = 0; i < 10; i++) sum += parseInt(cpf[i]) * (11 - i)
+    let d2 = 11 - (sum % 11); if (d2 >= 10) d2 = 0
+    return parseInt(cpf[10]) === d2
+  }
+
+  function maskCPF(v) {
+    v = v.replace(/\D/g, '').slice(0, 11)
+    if (v.length > 9) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4')
+    if (v.length > 6) return v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3')
+    if (v.length > 3) return v.replace(/(\d{3})(\d{1,3})/, '$1.$2')
+    return v
+  }
+
+  function getPartyTypeLabel(tipo) {
+    if (tipo === 'pj') return 'pessoa juridica de direito privado'
+    if (tipo === 'mei') return 'microempreendedor individual'
+    return 'pessoa fisica'
+  }
+
+  function formatPartyDoc(prefix) {
+    const tipo = c[`${prefix}_tipo`] || 'pf'
+    const cnpj = c[`${prefix}_cnpj`]
+    const cpf = c[`${prefix}_cpf`]
+    const parts = []
+    if ((tipo === 'pj' || tipo === 'mei') && cnpj) parts.push(`CNPJ: ${cnpj}`)
+    if (cpf) parts.push(`CPF: ${cpf}`)
+    return parts.join(', ')
+  }
+
+  function getTopics(clause) {
+    const items = clause.items_json ? (typeof clause.items_json === 'string' ? JSON.parse(clause.items_json) : clause.items_json) : []
+    if (items.length > 0 && typeof items[0] === 'string') return items.map(t => ({ text: t, subtopics: [] }))
+    return items.map(t => ({ text: t.text || '', subtopics: t.subtopics || [] }))
+  }
+
+  // Canvas drawing
+  function startDraw(e) {
+    const canvas = canvasRef.current; if (!canvas) return
+    setIsDrawing(true)
+    const ctx = canvas.getContext('2d')
+    const rect = canvas.getBoundingClientRect()
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left
+    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
+    ctx.beginPath(); ctx.moveTo(x, y)
+  }
+  function draw(e) {
+    if (!isDrawing) return
+    const canvas = canvasRef.current; if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    const rect = canvas.getBoundingClientRect()
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left
+    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
+    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#111'
+    ctx.lineTo(x, y); ctx.stroke()
+    setHasSignature(true)
+  }
+  function endDraw() { setIsDrawing(false) }
+  function clearCanvas() {
+    const canvas = canvasRef.current; if (!canvas) return
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
+    setHasSignature(false)
+  }
+  function getSignatureImage() {
+    const canvas = canvasRef.current
+    return (canvas && hasSignature) ? canvas.toDataURL('image/png') : null
+  }
+
+  async function handleSendOTP() {
+    const raw = signerCPF.replace(/\D/g, '')
+    if (raw.length !== 11 || !validateCPF(raw)) { setCpfError('CPF invalido'); return }
+    setCpfError('')
+    if (!signerName.trim()) { alert('Informe seu nome completo'); return }
+    setSubmitting(true)
+    try {
+      const data = await api.clientPortal.sendContractOTP()
+      setOtpEmail(data.email_sent_to || '')
+      setStep('otp')
+    } catch (err) { alert(err.message) } finally { setSubmitting(false) }
+  }
+
+  async function handleVerify() {
+    if (otpCode.length !== 6) { alert('Digite o codigo de 6 digitos'); return }
+    setSubmitting(true)
+    try {
+      let geolocation = null
+      try {
+        const pos = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 }))
+        geolocation = `${pos.coords.latitude},${pos.coords.longitude}`
+      } catch {}
+      const data = await api.clientPortal.signContract({
+        otp: otpCode, signer_name: signerName, signer_cpf: signerCPF,
+        signature_image: getSignatureImage(), geolocation,
+      })
+      if (data.error) { alert(data.error) }
+      else { setSignedAt(data.signed_at); setStep('done'); onSigned && onSigned() }
+    } catch (err) { alert(err.message) } finally { setSubmitting(false) }
+  }
+
+  if (step === 'done') return (
+    <div style={{ ...panelStyle, textAlign: 'center', padding: 40 }}>
+      <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+      <h3 style={{ color: theme.colors.text, fontSize: 18, fontWeight: 700, margin: '0 0 8px' }}>Contrato Assinado!</h3>
+      <p style={{ fontSize: 13, color: theme.colors.textMuted }}>
+        Sua assinatura foi registrada em {signedAt ? new Date(signedAt).toLocaleString('pt-BR') : 'agora'}.
+      </p>
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Status */}
+      {isSigned ? (
+        <div style={{ ...panelStyle, padding: 14, background: 'rgba(124,224,184,0.08)', borderColor: theme.colors.mint }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.mint }}>✅ Contrato assinado digitalmente</div>
+        </div>
+      ) : (
+        <div style={{ ...panelStyle, padding: 14, background: 'rgba(167,139,250,0.08)', borderColor: theme.colors.primary }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.primary }}>
+            Revise o contrato abaixo e assine digitalmente para confirmar os servicos.
+          </div>
+        </div>
+      )}
+
+      {/* Contract document */}
+      <div style={{
+        background: '#fff', color: '#111', padding: '36px 40px', borderRadius: 10,
+        fontFamily: "'Inter', serif", fontSize: 13, lineHeight: 1.7,
+        maxHeight: step === 'view' ? 500 : 300, overflowY: 'auto',
+        border: '1px solid rgba(255,255,255,0.1)',
+      }}>
+        <h1 style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, marginBottom: 20, textTransform: 'uppercase' }}>
+          {c.title}
+        </h1>
+
+        {c.contratante_nome && (
+          <p style={{ marginBottom: 10, textAlign: 'justify', fontSize: 12 }}>
+            <strong>CONTRATANTE: {c.contratante_nome}</strong>
+            {`, ${getPartyTypeLabel(c.contratante_tipo)}`}
+            {formatPartyDoc('contratante') && `, ${formatPartyDoc('contratante')}`}
+            {c.contratante_endereco && `, sede na ${c.contratante_endereco}`}
+          </p>
+        )}
+        {c.contratado_nome && (
+          <p style={{ marginBottom: 10, textAlign: 'justify', fontSize: 12 }}>
+            <strong>CONTRATADO: {c.contratado_nome}</strong>
+            {`, ${getPartyTypeLabel(c.contratado_tipo)}`}
+            {formatPartyDoc('contratado') && `, ${formatPartyDoc('contratado')}`}
+            {c.contratado_endereco && `, endereco: ${c.contratado_endereco}`}
+          </p>
+        )}
+
+        {(c.contratante_nome || c.contratado_nome) && (
+          <p style={{ marginBottom: 16, textAlign: 'justify', fontSize: 12 }}>
+            As partes acima identificadas tem, entre si, justo e contratado o que segue:
+          </p>
+        )}
+
+        {clauses.map((clause, idx) => {
+          const topics = getTopics(clause)
+          return (
+            <div key={idx} style={{ marginBottom: 16 }}>
+              <h2 style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>
+                CLAUSULA {idx + 1}&#170; &ndash; {clause.title}
+              </h2>
+              {clause.content && <p style={{ marginBottom: 4, textAlign: 'justify', fontSize: 12 }}>{clause.content}</p>}
+              {topics.length > 0 && (
+                <div>
+                  {topics.map((topic, i) => (
+                    <div key={i} style={{ marginBottom: 4 }}>
+                      <p style={{ fontSize: 12, textAlign: 'justify' }}>
+                        <strong>{idx + 1}.{i + 1}</strong> &ndash; {topic.text}
+                      </p>
+                      {topic.subtopics?.length > 0 && (
+                        <div style={{ paddingLeft: 20 }}>
+                          {topic.subtopics.map((sub, si) => (
+                            <p key={si} style={{ fontSize: 11.5, marginBottom: 2 }}>* {sub}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {(c.city || c.contract_date) && (
+          <p style={{ textAlign: 'center', marginTop: 24, fontSize: 12 }}>
+            {c.city || '___'}, {c.contract_date || '___'}
+          </p>
+        )}
+      </div>
+
+      {/* Sign form */}
+      {!isSigned && step === 'view' && (
+        <div style={{ ...panelStyle, padding: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text, marginBottom: 14 }}>Assinar contrato</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field label="Nome completo">
+              <input value={signerName} onChange={e => setSignerName(e.target.value)}
+                style={inputStyle} placeholder="Seu nome completo" />
+            </Field>
+            <Field label="CPF">
+              <input value={signerCPF} onChange={e => { setSignerCPF(maskCPF(e.target.value)); setCpfError('') }}
+                style={{ ...inputStyle, borderColor: cpfError ? '#f47383' : undefined }}
+                placeholder="000.000.000-00" maxLength={14} />
+              {cpfError && <div style={{ fontSize: 11, color: '#f47383', marginTop: 4 }}>{cpfError}</div>}
+            </Field>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4 }}>Assinatura (desenhe abaixo)</label>
+              <div style={{ position: 'relative', border: `1px solid ${theme.colors.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                <canvas ref={canvasRef} width={500} height={120}
+                  style={{ width: '100%', height: 120, background: '#fff', cursor: 'crosshair', touchAction: 'none' }}
+                  onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+                  onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+                />
+                {hasSignature && (
+                  <button onClick={clearCanvas} style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 10, cursor: 'pointer' }}>
+                    Limpar
+                  </button>
+                )}
+              </div>
+            </div>
+            <button onClick={handleSendOTP} disabled={submitting || !signerName.trim() || !signerCPF}
+              style={{ ...btnPrimary, width: '100%', opacity: (submitting || !signerName.trim() || !signerCPF) ? 0.5 : 1 }}>
+              {submitting ? 'Enviando...' : 'Enviar codigo de verificacao para meu email'}
+            </button>
+            <p style={{ fontSize: 11, color: theme.colors.textFaint, textAlign: 'center' }}>
+              Um codigo sera enviado ao email da sua conta para confirmar a assinatura.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* OTP */}
+      {!isSigned && step === 'otp' && (
+        <div style={{ ...panelStyle, padding: 24, textAlign: 'center' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text, marginBottom: 8 }}>Verificacao</h3>
+          <p style={{ fontSize: 12.5, color: theme.colors.textMuted, marginBottom: 16 }}>
+            Codigo enviado para <strong style={{ color: theme.colors.text }}>{otpEmail}</strong>
+          </p>
+          <input value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            style={{ width: 160, padding: '12px', borderRadius: 8, border: `1px solid ${theme.colors.border}`, background: theme.colors.bg, color: theme.colors.text, fontSize: 22, fontWeight: 700, textAlign: 'center', letterSpacing: 6, fontFamily: 'monospace' }}
+            placeholder="000000" maxLength={6} autoFocus
+          />
+          <button onClick={handleVerify} disabled={submitting || otpCode.length !== 6}
+            style={{ ...btnPrimary, display: 'block', width: '100%', maxWidth: 280, margin: '16px auto 0', opacity: (submitting || otpCode.length !== 6) ? 0.5 : 1 }}>
+            {submitting ? 'Verificando...' : 'Confirmar assinatura'}
+          </button>
+          <button onClick={handleSendOTP} disabled={submitting}
+            style={{ display: 'block', margin: '10px auto 0', background: 'transparent', border: 'none', color: theme.colors.primary, fontSize: 12, cursor: 'pointer' }}>
+            Reenviar codigo
+          </button>
         </div>
       )}
     </div>

@@ -2024,6 +2024,95 @@ router.get('/client/contract', authMiddleware, requireRole('cliente'), (req, res
   res.json({ contract: { ...contract, clauses }, usage: { used, limit: contract.monthly_videos } })
 })
 
+// Client sign contract directly from portal
+router.post('/client/contract/send-otp', authMiddleware, requireRole('cliente'), async (req, res) => {
+  const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente nao vinculado' })
+
+  const contract = get(
+    "SELECT * FROM contracts WHERE client_id = ? AND company_id = ? AND status = 'active'",
+    [client.id, req.user.company_id]
+  )
+  if (!contract) return res.status(404).json({ error: 'Nenhum contrato ativo' })
+  if (contract.signature_status === 'signed') return res.status(400).json({ error: 'Contrato ja assinado' })
+
+  // Generate document hash if not exists
+  if (!contract.document_hash) {
+    const clauses = all('SELECT title, content, items_json, position FROM contract_clauses WHERE contract_id = ? ORDER BY position', [contract.id])
+    const docContent = JSON.stringify({ contract, clauses })
+    const docHash = crypto.createHash('sha256').update(docContent).digest('hex')
+    run('UPDATE contracts SET document_hash = ?, signature_status = ? WHERE id = ?', [docHash, 'pending', contract.id])
+  }
+
+  // Create or update signature record
+  const existingSig = get('SELECT id FROM contract_signatures WHERE contract_id = ? AND signer_role = ?', [contract.id, 'contratante'])
+  const user = get('SELECT name, email FROM users WHERE id = ?', [req.user.id])
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString()
+
+  if (existingSig) {
+    run('UPDATE contract_signatures SET otp_code = ?, otp_sent_at = CURRENT_TIMESTAMP, signer_email = ?, signer_name = ? WHERE id = ?',
+      [otp, user.email, user.name, existingSig.id])
+  } else {
+    run(`INSERT INTO contract_signatures (contract_id, signer_role, signer_name, signer_email, otp_code, otp_sent_at)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [contract.id, 'contratante', user.name, user.email, otp])
+  }
+
+  // Send OTP
+  try {
+    const { sendOTPEmail } = await import('./email.js')
+    await sendOTPEmail(user.email, otp)
+    res.json({ success: true, email_sent_to: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') })
+  } catch (err) {
+    console.error('OTP email error:', err)
+    res.status(500).json({ error: 'Erro ao enviar codigo. Tente novamente.' })
+  }
+})
+
+router.post('/client/contract/sign', authMiddleware, requireRole('cliente'), (req, res) => {
+  const { otp, signer_name, signer_cpf, signature_image, geolocation } = req.body
+
+  const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente nao vinculado' })
+
+  const contract = get(
+    "SELECT * FROM contracts WHERE client_id = ? AND company_id = ? AND status = 'active'",
+    [client.id, req.user.company_id]
+  )
+  if (!contract) return res.status(404).json({ error: 'Nenhum contrato ativo' })
+  if (contract.signature_status === 'signed') return res.status(400).json({ error: 'Contrato ja assinado' })
+
+  const signature = get('SELECT * FROM contract_signatures WHERE contract_id = ? AND signer_role = ? ORDER BY id DESC LIMIT 1', [contract.id, 'contratante'])
+  if (!signature || !signature.otp_code) return res.status(400).json({ error: 'Solicite o codigo primeiro' })
+
+  // Verify OTP
+  if (signature.otp_code !== otp) {
+    return res.status(400).json({ error: 'Codigo invalido' })
+  }
+
+  // Check expiry (10 min)
+  const otpSentAt = new Date(signature.otp_sent_at + 'Z')
+  if ((new Date() - otpSentAt) > 10 * 60 * 1000) {
+    return res.status(400).json({ error: 'Codigo expirado. Solicite um novo.' })
+  }
+
+  const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'
+  const userAgent = req.headers['user-agent'] || 'unknown'
+
+  run(`UPDATE contract_signatures SET
+       signer_name = ?, signer_cpf = ?, ip_address = ?, user_agent = ?,
+       signed_at = CURRENT_TIMESTAMP, document_hash = ?, signature_image = ?,
+       geolocation = ?, otp_code = NULL
+       WHERE id = ?`,
+    [signer_name || signature.signer_name, signer_cpf || '', ip, userAgent,
+     contract.document_hash, signature_image || null, geolocation || null, signature.id])
+
+  run('UPDATE contracts SET signature_status = ? WHERE id = ?', ['signed', contract.id])
+
+  res.json({ success: true, signed_at: new Date().toISOString() })
+})
+
 // ============ CONTRACTS (gestor) ============
 
 router.get('/contracts', authMiddleware, requireRole('gestor'), (req, res) => {

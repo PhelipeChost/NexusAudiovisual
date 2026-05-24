@@ -74,6 +74,8 @@ const api = {
     getInvoiceItems: (id) => request(`/client/invoices/${id}/items`),
     createOrder: (data) => request('/client/orders', { method: 'POST', body: JSON.stringify(data) }),
     getContract: () => request('/client/contract'),
+    sendContractOTP: () => request('/client/contract/send-otp', { method: 'POST' }),
+    signContract: (data) => request('/client/contract/sign', { method: 'POST', body: JSON.stringify(data) }),
   },
 
   editorPortal: {
