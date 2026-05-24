@@ -9,6 +9,48 @@ import {
   panelStyle, fmtBRL,
 } from '../components/ui'
 
+// CPF validation (algorithmic check digit validation)
+function validateCPF(cpf) {
+  cpf = cpf.replace(/\D/g, '')
+  if (cpf.length !== 11) return false
+  if (/^(\d)\1+$/.test(cpf)) return false // all same digits
+  let sum = 0
+  for (let i = 0; i < 9; i++) sum += parseInt(cpf[i]) * (10 - i)
+  let d1 = 11 - (sum % 11)
+  if (d1 >= 10) d1 = 0
+  if (parseInt(cpf[9]) !== d1) return false
+  sum = 0
+  for (let i = 0; i < 10; i++) sum += parseInt(cpf[i]) * (11 - i)
+  let d2 = 11 - (sum % 11)
+  if (d2 >= 10) d2 = 0
+  return parseInt(cpf[10]) === d2
+}
+
+// CPF mask (000.000.000-00)
+function maskCPF(v) {
+  v = v.replace(/\D/g, '').slice(0, 11)
+  if (v.length > 9) return v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4')
+  if (v.length > 6) return v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3')
+  if (v.length > 3) return v.replace(/(\d{3})(\d{1,3})/, '$1.$2')
+  return v
+}
+
+// CNPJ mask (00.000.000/0001-00)
+function maskCNPJ(v) {
+  v = v.replace(/\D/g, '').slice(0, 14)
+  if (v.length > 12) return v.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})/, '$1.$2.$3/$4-$5')
+  if (v.length > 8) return v.replace(/(\d{2})(\d{3})(\d{3})(\d{1,4})/, '$1.$2.$3/$4')
+  if (v.length > 5) return v.replace(/(\d{2})(\d{3})(\d{1,3})/, '$1.$2.$3')
+  if (v.length > 2) return v.replace(/(\d{2})(\d{1,3})/, '$1.$2')
+  return v
+}
+
+const PARTY_TYPES = [
+  { value: 'pj', label: 'Pessoa Juridica' },
+  { value: 'mei', label: 'Microempreendedor (MEI)' },
+  { value: 'pf', label: 'Pessoa Fisica' },
+]
+
 const STATUS_MAP = {
   active: { label: 'ativo', bg: 'rgba(124,224,184,0.12)', color: theme.colors.mint },
   draft: { label: 'rascunho', bg: theme.colors.bgSecondary, color: theme.colors.textMuted },
@@ -184,10 +226,16 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
     monthly_value: editing?.monthly_value || '',
     notes: editing?.notes || '',
     // Party data
+    contratante_tipo: editing?.contratante_tipo || 'pf',
     contratante_nome: editing?.contratante_nome || '',
+    contratante_cnpj: editing?.contratante_cnpj || '',
+    contratante_cpf: editing?.contratante_cpf || '',
     contratante_doc: editing?.contratante_doc || '',
     contratante_endereco: editing?.contratante_endereco || '',
+    contratado_tipo: editing?.contratado_tipo || 'pf',
     contratado_nome: editing?.contratado_nome || '',
+    contratado_cnpj: editing?.contratado_cnpj || '',
+    contratado_cpf: editing?.contratado_cpf || '',
     contratado_doc: editing?.contratado_doc || '',
     contratado_endereco: editing?.contratado_endereco || '',
     // Payment
@@ -199,6 +247,8 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
     contract_date: editing?.contract_date || '',
   })
   const [clauses, setClauses] = useState([])
+  const [cnpjLoading, setCnpjLoading] = useState(null) // 'contratante' | 'contratado' | null
+  const [cnpjError, setCnpjError] = useState({})
   const [saving, setSaving] = useState(false)
   const [loadingClauses, setLoadingClauses] = useState(!!editing)
 
@@ -213,10 +263,16 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
         // Update form with full data
         setForm(f => ({
           ...f,
+          contratante_tipo: full.contratante_tipo || f.contratante_tipo,
           contratante_nome: full.contratante_nome || f.contratante_nome,
+          contratante_cnpj: full.contratante_cnpj || f.contratante_cnpj,
+          contratante_cpf: full.contratante_cpf || f.contratante_cpf,
           contratante_doc: full.contratante_doc || f.contratante_doc,
           contratante_endereco: full.contratante_endereco || f.contratante_endereco,
+          contratado_tipo: full.contratado_tipo || f.contratado_tipo,
           contratado_nome: full.contratado_nome || f.contratado_nome,
+          contratado_cnpj: full.contratado_cnpj || f.contratado_cnpj,
+          contratado_cpf: full.contratado_cpf || f.contratado_cpf,
           contratado_doc: full.contratado_doc || f.contratado_doc,
           contratado_endereco: full.contratado_endereco || f.contratado_endereco,
           payment_value: full.payment_value || f.payment_value,
@@ -296,8 +352,6 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
     } catch (err) { alert(err.message) } finally { setSaving(false) }
   }
 
-  const LETTERS = 'abcdefghijklmnopqrstuvwxyz'
-
   const tabStyle = (id) => ({
     padding: '7px 14px', borderRadius: 6, fontSize: 12.5, border: 'none', cursor: 'pointer',
     background: tab === id ? theme.colors.surfaceHover : 'transparent',
@@ -366,39 +420,29 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
       {/* Parties tab */}
       {tab === 'parties' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.primary }}>Contratante</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <Field label="Nome / Razao social">
-                <input value={form.contratante_nome} onChange={e => setForm(f => ({ ...f, contratante_nome: e.target.value }))}
-                  style={inputStyle} placeholder="Ex: EMPRESA XYZ LTDA - MEI" />
-              </Field>
-              <Field label="CNPJ/CPF e documentos">
-                <input value={form.contratante_doc} onChange={e => setForm(f => ({ ...f, contratante_doc: e.target.value }))}
-                  style={inputStyle} placeholder="CNPJ: 00.000.000/0001-00, RG: 00000000-0, CPF: 000.000.000-00" />
-              </Field>
-              <Field label="Endereco completo">
-                <input value={form.contratante_endereco} onChange={e => setForm(f => ({ ...f, contratante_endereco: e.target.value }))}
-                  style={inputStyle} placeholder="Rua..., n..., Bairro, Cidade - UF, CEP: 00000-000" />
-              </Field>
-            </div>
-          </div>
+          <PartySection
+            label="Contratante"
+            color={theme.colors.primary}
+            prefix="contratante"
+            form={form}
+            setForm={setForm}
+            cnpjLoading={cnpjLoading}
+            setCnpjLoading={setCnpjLoading}
+            cnpjError={cnpjError}
+            setCnpjError={setCnpjError}
+          />
           <div style={{ borderTop: `1px solid ${theme.colors.border}`, paddingTop: 18 }}>
-            <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.mint }}>Contratado</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <Field label="Nome completo">
-                <input value={form.contratado_nome} onChange={e => setForm(f => ({ ...f, contratado_nome: e.target.value }))}
-                  style={inputStyle} placeholder="Ex: JOAO DA SILVA" />
-              </Field>
-              <Field label="Documentos (RG, CPF)">
-                <input value={form.contratado_doc} onChange={e => setForm(f => ({ ...f, contratado_doc: e.target.value }))}
-                  style={inputStyle} placeholder="RG: 00.000.000-0, CPF: 000.000.000-00" />
-              </Field>
-              <Field label="Endereco completo">
-                <input value={form.contratado_endereco} onChange={e => setForm(f => ({ ...f, contratado_endereco: e.target.value }))}
-                  style={inputStyle} placeholder="Rua..., n..., Bairro, Cidade - UF, CEP: 00000-000" />
-              </Field>
-            </div>
+            <PartySection
+              label="Contratado"
+              color={theme.colors.mint}
+              prefix="contratado"
+              form={form}
+              setForm={setForm}
+              cnpjLoading={cnpjLoading}
+              setCnpjLoading={setCnpjLoading}
+              cnpjError={cnpjError}
+              setCnpjError={setCnpjError}
+            />
           </div>
         </div>
       )}
@@ -408,7 +452,7 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: theme.colors.textMuted }}>
-              Clausulas numeradas com sub-itens (a, b, c...)
+              Clausulas numeradas com sub-topicos (1.1, 1.2, 1.3...)
             </span>
             <button type="button" onClick={addClause} style={{ ...btnGhost, padding: '6px 12px', fontSize: 12 }}>
               <Icon name="plus" size={12} /> Adicionar clausula
@@ -425,7 +469,7 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
                   {/* Clause header */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                     <span className="mono" style={{ fontSize: 12, color: theme.colors.primary, fontWeight: 700, minWidth: 32 }}>
-                      {idx + 1}a
+                      {idx + 1}&#170;
                     </span>
                     <input
                       value={clause.title}
@@ -456,18 +500,18 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
                     style={{ ...inputStyle, fontSize: 12.5, resize: 'vertical', minHeight: 45, marginBottom: 8 }}
                   />
 
-                  {/* Sub-items */}
+                  {/* Sub-topics (numbered: 1.1, 1.2, 1.3...) */}
                   {clause.items && clause.items.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8, paddingLeft: 16 }}>
                       {clause.items.map((item, itemIdx) => (
                         <div key={itemIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                          <span className="mono" style={{ fontSize: 11, color: theme.colors.gold, fontWeight: 600, marginTop: 8, minWidth: 16 }}>
-                            {LETTERS[itemIdx] || '?'})
+                          <span className="mono" style={{ fontSize: 11, color: theme.colors.gold, fontWeight: 600, marginTop: 8, minWidth: 28 }}>
+                            {idx + 1}.{itemIdx + 1}
                           </span>
                           <textarea
                             value={item}
                             onChange={e => updateItem(idx, itemIdx, e.target.value)}
-                            placeholder={`Item ${LETTERS[itemIdx]}...`}
+                            placeholder={`Subtopico ${idx + 1}.${itemIdx + 1}...`}
                             rows={1}
                             style={{ ...inputStyle, flex: 1, fontSize: 12, padding: '6px 10px', resize: 'vertical', minHeight: 32 }}
                           />
@@ -481,7 +525,7 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
                   )}
                   <button type="button" onClick={() => addItem(idx)}
                     style={{ fontSize: 11, color: theme.colors.primary, background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Icon name="plus" size={10} /> Adicionar item ({LETTERS[(clause.items || []).length] || '?'})
+                    <Icon name="plus" size={10} /> Adicionar subtopico ({idx + 1}.{(clause.items || []).length + 1})
                   </button>
                 </div>
               ))}
@@ -578,6 +622,158 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
 }
 
 /* ============================================================
+   PartySection — flexible party type (PJ / MEI / PF) with CNPJ lookup + CPF validation
+   ============================================================ */
+function PartySection({ label, color, prefix, form, setForm, cnpjLoading, setCnpjLoading, cnpjError, setCnpjError }) {
+  const tipo = form[`${prefix}_tipo`]
+  const showCnpj = tipo === 'pj' || tipo === 'mei'
+
+  async function lookupCNPJ() {
+    const cnpj = form[`${prefix}_cnpj`]?.replace(/\D/g, '')
+    if (!cnpj || cnpj.length !== 14) {
+      setCnpjError(prev => ({ ...prev, [prefix]: 'CNPJ deve ter 14 digitos' }))
+      return
+    }
+    setCnpjLoading(prefix)
+    setCnpjError(prev => ({ ...prev, [prefix]: null }))
+    try {
+      const data = await api.lookup.cnpj(cnpj)
+      setForm(f => ({
+        ...f,
+        [`${prefix}_nome`]: data.razao_social || f[`${prefix}_nome`],
+        [`${prefix}_endereco`]: data.endereco_completo || f[`${prefix}_endereco`],
+      }))
+    } catch (err) {
+      setCnpjError(prev => ({ ...prev, [prefix]: err.message || 'CNPJ nao encontrado' }))
+    } finally {
+      setCnpjLoading(null)
+    }
+  }
+
+  function handleCPFChange(value) {
+    const masked = maskCPF(value)
+    setForm(f => ({ ...f, [`${prefix}_cpf`]: masked }))
+    // Validate when complete
+    const raw = value.replace(/\D/g, '')
+    if (raw.length === 11) {
+      if (!validateCPF(raw)) {
+        setCnpjError(prev => ({ ...prev, [`${prefix}_cpf`]: 'CPF invalido' }))
+      } else {
+        setCnpjError(prev => ({ ...prev, [`${prefix}_cpf`]: null }))
+      }
+    } else {
+      setCnpjError(prev => ({ ...prev, [`${prefix}_cpf`]: null }))
+    }
+  }
+
+  function handleCNPJChange(value) {
+    setForm(f => ({ ...f, [`${prefix}_cnpj`]: maskCNPJ(value) }))
+    setCnpjError(prev => ({ ...prev, [prefix]: null }))
+  }
+
+  const isLoadingThis = cnpjLoading === prefix
+
+  return (
+    <div>
+      <div className="eyebrow" style={{ marginBottom: 10, color }}>{label}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Type selector */}
+        <Field label="Tipo">
+          <div style={{ display: 'flex', gap: 6 }}>
+            {PARTY_TYPES.map(t => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setForm(f => ({ ...f, [`${prefix}_tipo`]: t.value }))}
+                style={{
+                  padding: '7px 14px', borderRadius: 6, fontSize: 12, border: `1px solid ${theme.colors.border}`,
+                  cursor: 'pointer', transition: 'all .15s',
+                  background: tipo === t.value ? `${color}18` : theme.colors.bg,
+                  color: tipo === t.value ? color : theme.colors.textMuted,
+                  fontWeight: tipo === t.value ? 600 : 400,
+                  borderColor: tipo === t.value ? color : theme.colors.border,
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {/* CNPJ (shown for PJ/MEI) */}
+        {showCnpj && (
+          <Field label="CNPJ" hint={tipo === 'mei' ? 'CNPJ do MEI' : 'CNPJ da empresa'}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={form[`${prefix}_cnpj`] || ''}
+                onChange={e => handleCNPJChange(e.target.value)}
+                style={{ ...inputStyle, flex: 1 }}
+                placeholder="00.000.000/0001-00"
+                maxLength={18}
+              />
+              <button
+                type="button"
+                onClick={lookupCNPJ}
+                disabled={isLoadingThis}
+                style={{
+                  ...btnSoft, padding: '8px 14px', fontSize: 11.5, whiteSpace: 'nowrap',
+                  opacity: isLoadingThis ? 0.6 : 1,
+                }}
+              >
+                {isLoadingThis ? 'Consultando...' : 'Consultar'}
+              </button>
+            </div>
+            {cnpjError[prefix] && (
+              <div style={{ fontSize: 11, color: theme.colors.danger, marginTop: 4 }}>{cnpjError[prefix]}</div>
+            )}
+          </Field>
+        )}
+
+        {/* CPF (always shown) */}
+        <Field label="CPF" hint={showCnpj ? 'CPF do representante legal' : 'CPF'}>
+          <input
+            value={form[`${prefix}_cpf`] || ''}
+            onChange={e => handleCPFChange(e.target.value)}
+            style={{
+              ...inputStyle,
+              borderColor: cnpjError[`${prefix}_cpf`] ? theme.colors.danger : undefined,
+            }}
+            placeholder="000.000.000-00"
+            maxLength={14}
+          />
+          {cnpjError[`${prefix}_cpf`] && (
+            <div style={{ fontSize: 11, color: theme.colors.danger, marginTop: 4 }}>{cnpjError[`${prefix}_cpf`]}</div>
+          )}
+          {form[`${prefix}_cpf`]?.replace(/\D/g, '').length === 11 && !cnpjError[`${prefix}_cpf`] && (
+            <div style={{ fontSize: 11, color: theme.colors.mint, marginTop: 4 }}>CPF valido</div>
+          )}
+        </Field>
+
+        {/* Nome / Razao Social */}
+        <Field label={showCnpj ? 'Razao Social' : 'Nome completo'}>
+          <input
+            value={form[`${prefix}_nome`] || ''}
+            onChange={e => setForm(f => ({ ...f, [`${prefix}_nome`]: e.target.value }))}
+            style={inputStyle}
+            placeholder={showCnpj ? 'Preenchido automaticamente pela consulta CNPJ' : 'Nome completo'}
+          />
+        </Field>
+
+        {/* Endereco */}
+        <Field label="Endereco completo">
+          <input
+            value={form[`${prefix}_endereco`] || ''}
+            onChange={e => setForm(f => ({ ...f, [`${prefix}_endereco`]: e.target.value }))}
+            style={inputStyle}
+            placeholder={showCnpj ? 'Preenchido automaticamente pela consulta CNPJ' : 'Rua..., n..., Bairro, Cidade - UF, CEP: 00000-000'}
+          />
+        </Field>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================
    ContractDetail — summary view with actions
    ============================================================ */
 function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
@@ -634,14 +830,22 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
             <div style={{ padding: 12, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`, borderRadius: 8 }}>
               <div className="eyebrow" style={{ marginBottom: 6, color: theme.colors.primary }}>Contratante</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.text, marginBottom: 2 }}>{contract.contratante_nome}</div>
-              {contract.contratante_doc && <div style={{ fontSize: 11.5, color: theme.colors.textMuted }}>{contract.contratante_doc}</div>}
+              <div style={{ fontSize: 11, color: theme.colors.textMuted, marginBottom: 2 }}>
+                {contract.contratante_tipo === 'pj' ? 'Pessoa Juridica' : contract.contratante_tipo === 'mei' ? 'MEI' : 'Pessoa Fisica'}
+              </div>
+              {contract.contratante_cnpj && <div style={{ fontSize: 11.5, color: theme.colors.textMuted }}>CNPJ: {contract.contratante_cnpj}</div>}
+              {contract.contratante_cpf && <div style={{ fontSize: 11.5, color: theme.colors.textMuted }}>CPF: {contract.contratante_cpf}</div>}
             </div>
           )}
           {contract.contratado_nome && (
             <div style={{ padding: 12, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`, borderRadius: 8 }}>
               <div className="eyebrow" style={{ marginBottom: 6, color: theme.colors.mint }}>Contratado</div>
               <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.text, marginBottom: 2 }}>{contract.contratado_nome}</div>
-              {contract.contratado_doc && <div style={{ fontSize: 11.5, color: theme.colors.textMuted }}>{contract.contratado_doc}</div>}
+              <div style={{ fontSize: 11, color: theme.colors.textMuted, marginBottom: 2 }}>
+                {contract.contratado_tipo === 'pj' ? 'Pessoa Juridica' : contract.contratado_tipo === 'mei' ? 'MEI' : 'Pessoa Fisica'}
+              </div>
+              {contract.contratado_cnpj && <div style={{ fontSize: 11.5, color: theme.colors.textMuted }}>CNPJ: {contract.contratado_cnpj}</div>}
+              {contract.contratado_cpf && <div style={{ fontSize: 11.5, color: theme.colors.textMuted }}>CPF: {contract.contratado_cpf}</div>}
             </div>
           )}
         </div>
@@ -658,7 +862,7 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
                 border: `1px solid ${theme.colors.border}`, borderRadius: 8,
               }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: theme.colors.text, marginBottom: clause.content || (clause.items && clause.items.length > 0) ? 6 : 0 }}>
-                  <span className="mono" style={{ color: theme.colors.primary, marginRight: 6 }}>{idx + 1}a</span>
+                  <span className="mono" style={{ color: theme.colors.primary, marginRight: 6 }}>{idx + 1}&#170;</span>
                   {clause.title}
                 </div>
                 {clause.content && (
@@ -670,7 +874,7 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
                   <div style={{ paddingLeft: 16 }}>
                     {clause.items.map((item, i) => (
                       <div key={i} style={{ fontSize: 11.5, color: theme.colors.textSecondary, lineHeight: 1.5, marginBottom: 2 }}>
-                        <span className="mono" style={{ color: theme.colors.gold, marginRight: 4 }}>{'abcdefghijklmnopqrstuvwxyz'[i]})</span>
+                        <span className="mono" style={{ color: theme.colors.gold, marginRight: 6 }}>{idx + 1}.{i + 1}</span>
                         {item}
                       </div>
                     ))}
@@ -703,7 +907,37 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
    ============================================================ */
 function ContractDocPreview({ contract, onClose }) {
   const clauses = contract.clauses || []
-  const LETTERS = 'abcdefghijklmnopqrstuvwxyz'
+
+  function formatPartyDoc(prefix) {
+    const tipo = contract[`${prefix}_tipo`] || 'pf'
+    const cnpj = contract[`${prefix}_cnpj`]
+    const cpf = contract[`${prefix}_cpf`]
+    const parts = []
+    if (tipo === 'pj' || tipo === 'mei') {
+      if (cnpj) parts.push(`inscrita no CNPJ sob o n. ${cnpj}`)
+    }
+    if (cpf) parts.push(`CPF n. ${cpf}`)
+    return parts.join(', ')
+  }
+
+  function formatPartyIntro(prefix) {
+    const tipo = contract[`${prefix}_tipo`] || 'pf'
+    const endereco = contract[`${prefix}_endereco`]
+    if (tipo === 'pj') {
+      return endereco ? `, com sede na ${endereco}` : ''
+    } else if (tipo === 'mei') {
+      return endereco ? `, com endereco comercial na ${endereco}` : ''
+    } else {
+      return endereco ? `, residente e domiciliado(a) na ${endereco}` : ''
+    }
+  }
+
+  function getPartyTypeLabel(prefix) {
+    const tipo = contract[`${prefix}_tipo`] || 'pf'
+    if (tipo === 'pj') return 'pessoa juridica de direito privado'
+    if (tipo === 'mei') return 'microempreendedor individual'
+    return 'pessoa fisica'
+  }
 
   const docStyle = {
     background: '#fff', color: '#111', padding: '48px 56px',
@@ -724,17 +958,19 @@ function ContractDocPreview({ contract, onClose }) {
         {contract.contratante_nome && (
           <p style={{ marginBottom: 14, textAlign: 'justify' }}>
             <strong>CONTRATANTE: {contract.contratante_nome}</strong>
-            {contract.contratante_doc && `, ${contract.contratante_doc}`}
-            {contract.contratante_endereco && `, com sede na ${contract.contratante_endereco}`}
-            , doravante denominado simplesmente "CONTRATANTE".
+            {`, ${getPartyTypeLabel('contratante')}`}
+            {formatPartyDoc('contratante') && `, ${formatPartyDoc('contratante')}`}
+            {formatPartyIntro('contratante')}
+            , doravante denominado(a) simplesmente "CONTRATANTE".
           </p>
         )}
         {contract.contratado_nome && (
           <p style={{ marginBottom: 14, textAlign: 'justify' }}>
             <strong>CONTRATADO: {contract.contratado_nome}</strong>
-            {contract.contratado_doc && `, ${contract.contratado_doc}`}
-            {contract.contratado_endereco && `, residente e domiciliado na ${contract.contratado_endereco}`}
-            , doravante denominado simplesmente como "CONTRATADO".
+            {`, ${getPartyTypeLabel('contratado')}`}
+            {formatPartyDoc('contratado') && `, ${formatPartyDoc('contratado')}`}
+            {formatPartyIntro('contratado')}
+            , doravante denominado(a) simplesmente "CONTRATADO".
           </p>
         )}
 
@@ -748,7 +984,7 @@ function ContractDocPreview({ contract, onClose }) {
         {clauses.map((clause, idx) => (
           <div key={idx} style={{ marginBottom: 22 }}>
             <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, textTransform: 'uppercase' }}>
-              CLAUSULA {idx + 1}a - {clause.title}
+              CLAUSULA {idx + 1}&#170; &ndash; {clause.title}
             </h2>
             {clause.content && (
               <p style={{ marginBottom: 8, textAlign: 'justify' }}>
@@ -756,10 +992,10 @@ function ContractDocPreview({ contract, onClose }) {
               </p>
             )}
             {clause.items && clause.items.length > 0 && (
-              <div style={{ paddingLeft: 28 }}>
+              <div style={{ paddingLeft: 0 }}>
                 {clause.items.map((item, i) => (
                   <p key={i} style={{ marginBottom: 6, textAlign: 'justify' }}>
-                    {LETTERS[i]}) {item}
+                    <strong>{idx + 1}.{i + 1}</strong> &ndash; {item}
                   </p>
                 ))}
               </div>
@@ -781,6 +1017,9 @@ function ContractDocPreview({ contract, onClose }) {
               {contract.contratante_nome && (
                 <div style={{ fontSize: 12, marginTop: 4 }}>{contract.contratante_nome}</div>
               )}
+              {contract.contratante_cpf && (
+                <div style={{ fontSize: 11, marginTop: 2, color: '#555' }}>CPF: {contract.contratante_cpf}</div>
+              )}
             </div>
           </div>
           <div style={{ flex: 1, textAlign: 'center' }}>
@@ -788,6 +1027,9 @@ function ContractDocPreview({ contract, onClose }) {
               <strong>CONTRATADO</strong>
               {contract.contratado_nome && (
                 <div style={{ fontSize: 12, marginTop: 4 }}>{contract.contratado_nome}</div>
+              )}
+              {contract.contratado_cpf && (
+                <div style={{ fontSize: 11, marginTop: 2, color: '#555' }}>CPF: {contract.contratado_cpf}</div>
               )}
             </div>
           </div>

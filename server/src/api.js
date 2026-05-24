@@ -2054,19 +2054,24 @@ router.post('/contracts', authMiddleware, requireRole('gestor'), (req, res) => {
   const {
     client_id, title, start_date, end_date, monthly_videos, monthly_value, notes, clauses, status,
     contratante_nome, contratante_doc, contratante_endereco,
+    contratante_tipo, contratante_cnpj, contratante_cpf,
     contratado_nome, contratado_doc, contratado_endereco,
+    contratado_tipo, contratado_cnpj, contratado_cpf,
     payment_value, payment_date, payment_details, city, contract_date,
   } = req.body
   if (!title) return res.status(400).json({ error: 'Titulo obrigatorio' })
 
   const result = run(
     `INSERT INTO contracts (company_id, client_id, title, status, start_date, end_date, monthly_videos, monthly_value, notes,
-     contratante_nome, contratante_doc, contratante_endereco, contratado_nome, contratado_doc, contratado_endereco,
+     contratante_nome, contratante_doc, contratante_endereco, contratante_tipo, contratante_cnpj, contratante_cpf,
+     contratado_nome, contratado_doc, contratado_endereco, contratado_tipo, contratado_cnpj, contratado_cpf,
      payment_value, payment_date, payment_details, city, contract_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [req.user.company_id, client_id || null, title, status || 'draft', start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null,
      contratante_nome || null, contratante_doc || null, contratante_endereco || null,
+     contratante_tipo || 'pf', contratante_cnpj || null, contratante_cpf || null,
      contratado_nome || null, contratado_doc || null, contratado_endereco || null,
+     contratado_tipo || 'pf', contratado_cnpj || null, contratado_cpf || null,
      payment_value || 0, payment_date || null, payment_details || null, city || null, contract_date || null]
   )
 
@@ -2090,7 +2095,9 @@ router.put('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) =
   const {
     title, status, start_date, end_date, monthly_videos, monthly_value, notes, clauses, client_id,
     contratante_nome, contratante_doc, contratante_endereco,
+    contratante_tipo, contratante_cnpj, contratante_cpf,
     contratado_nome, contratado_doc, contratado_endereco,
+    contratado_tipo, contratado_cnpj, contratado_cpf,
     payment_value, payment_date, payment_details, city, contract_date,
   } = req.body
   const id = req.params.id
@@ -2101,12 +2108,16 @@ router.put('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) =
   run(
     `UPDATE contracts SET title = ?, status = ?, start_date = ?, end_date = ?, monthly_videos = ?, monthly_value = ?, notes = ?,
      client_id = ?, contratante_nome = ?, contratante_doc = ?, contratante_endereco = ?,
+     contratante_tipo = ?, contratante_cnpj = ?, contratante_cpf = ?,
      contratado_nome = ?, contratado_doc = ?, contratado_endereco = ?,
+     contratado_tipo = ?, contratado_cnpj = ?, contratado_cpf = ?,
      payment_value = ?, payment_date = ?, payment_details = ?, city = ?, contract_date = ?
      WHERE id = ?`,
     [title, status, start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null,
      client_id || null, contratante_nome || null, contratante_doc || null, contratante_endereco || null,
+     contratante_tipo || 'pf', contratante_cnpj || null, contratante_cpf || null,
      contratado_nome || null, contratado_doc || null, contratado_endereco || null,
+     contratado_tipo || 'pf', contratado_cnpj || null, contratado_cpf || null,
      payment_value || 0, payment_date || null, payment_details || null, city || null, contract_date || null, id]
   )
 
@@ -2130,6 +2141,46 @@ router.put('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) =
 router.delete('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) => {
   run('DELETE FROM contracts WHERE id = ? AND company_id = ?', [req.params.id, req.user.company_id])
   res.json({ success: true })
+})
+
+// ============ CNPJ LOOKUP (proxy to BrasilAPI) ============
+router.get('/lookup/cnpj/:cnpj', authMiddleware, async (req, res) => {
+  const cnpj = req.params.cnpj.replace(/\D/g, '')
+  if (cnpj.length !== 14) return res.status(400).json({ error: 'CNPJ invalido (deve ter 14 digitos)' })
+  try {
+    const resp = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`)
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      return res.status(resp.status).json({ error: err.message || 'CNPJ nao encontrado' })
+    }
+    const data = await resp.json()
+    res.json({
+      razao_social: data.razao_social,
+      nome_fantasia: data.nome_fantasia,
+      cnpj: data.cnpj,
+      tipo: data.descricao_identificador_matriz_filial,
+      porte: data.porte,
+      natureza_juridica: data.natureza_juridica,
+      situacao: data.descricao_situacao_cadastral,
+      logradouro: data.logradouro,
+      numero: data.numero,
+      complemento: data.complemento,
+      bairro: data.bairro,
+      municipio: data.municipio,
+      uf: data.uf,
+      cep: data.cep,
+      endereco_completo: [
+        data.logradouro,
+        data.numero ? `n ${data.numero}` : null,
+        data.complemento,
+        data.bairro,
+        `${data.municipio} - ${data.uf}`,
+        data.cep ? `CEP: ${data.cep}` : null,
+      ].filter(Boolean).join(', '),
+    })
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao consultar CNPJ' })
+  }
 })
 
 // ============ COMMENTS (accessible by editor and client too) ============

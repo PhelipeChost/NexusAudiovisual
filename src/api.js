@@ -92,6 +92,10 @@ const api = {
     delete: (id) => request(`/contracts/${id}`, { method: 'DELETE' }),
   },
 
+  lookup: {
+    cnpj: (cnpj) => request(`/lookup/cnpj/${cnpj}`),
+  },
+
   orders: {
     listByClient: (clientId, month) => request(`/clients/${clientId}/orders${month ? `?month=${month}` : ''}`),
     listAll: () => request('/orders'),

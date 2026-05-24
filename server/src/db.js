@@ -490,6 +490,12 @@ async function initDb() {
   try { db.run("ALTER TABLE contracts ADD COLUMN contratado_nome TEXT") } catch {}
   try { db.run("ALTER TABLE contracts ADD COLUMN contratado_doc TEXT") } catch {}
   try { db.run("ALTER TABLE contracts ADD COLUMN contratado_endereco TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratante_tipo TEXT DEFAULT 'pf'") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratante_cnpj TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratante_cpf TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratado_tipo TEXT DEFAULT 'pf'") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratado_cnpj TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratado_cpf TEXT") } catch {}
   try { db.run("ALTER TABLE contracts ADD COLUMN payment_value REAL DEFAULT 0") } catch {}
   try { db.run("ALTER TABLE contracts ADD COLUMN payment_date TEXT") } catch {}
   try { db.run("ALTER TABLE contracts ADD COLUMN payment_details TEXT") } catch {}
