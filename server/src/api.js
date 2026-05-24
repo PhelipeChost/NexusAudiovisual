@@ -719,7 +719,7 @@ router.get('/orders', authMiddleware, (req, res) => {
 })
 
 router.post('/clients/:clientId/orders', authMiddleware, requireRole('gestor', 'supervisor', 'cliente'), (req, res) => {
-  const { title, description, briefing, drive_links, priority, due_date, editor_id, value, editor_value } = req.body
+  const { title, description, briefing, drive_links, priority, due_date, editor_id, value, editor_value, video_type, duration, format } = req.body
   if (!title) return res.status(400).json({ error: 'Título é obrigatório' })
 
   // For client users, verify they own this client record
@@ -743,12 +743,13 @@ router.post('/clients/:clientId/orders', authMiddleware, requireRole('gestor', '
   const editorValue = editor_value ? parseFloat(editor_value) : 0
 
   const result = run(
-    `INSERT INTO orders (company_id, client_id, column_id, editor_id, title, description, briefing, drive_links, priority, due_date, position, value, editor_value)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders (company_id, client_id, column_id, editor_id, title, description, briefing, drive_links, priority, due_date, position, value, editor_value, video_type, duration, format)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       req.user.company_id, req.params.clientId, firstCol?.id || null,
       editor_id || null, title, description || null, briefing || null,
-      drive_links || null, priority || 'normal', due_date || null, (maxPos?.max || 0) + 1, orderValue, editorValue
+      drive_links || null, priority || 'normal', due_date || null, (maxPos?.max || 0) + 1, orderValue, editorValue,
+      video_type || null, duration || null, format || null
     ]
   )
 
@@ -1799,6 +1800,381 @@ router.get('/editor/report', authMiddleware, requireRole('gestor'), (req, res) =
   })
 
   res.json({ editors })
+})
+
+// ============ EDITOR FINANCIAL (for editor role) ============
+
+router.get('/editor/financial', authMiddleware, requireRole('editor'), (req, res) => {
+  const uid = req.user.id
+
+  // Get all companies this editor belongs to
+  const companyIds = all(
+    "SELECT company_id FROM team_memberships WHERE user_id = ? AND status = 'active'",
+    [uid]
+  ).map(r => r.company_id)
+  companyIds.push(req.user.company_id)
+  const cidList = [...new Set(companyIds)]
+
+  // Get all payment batches for this editor
+  const batches = all(
+    `SELECT epb.*, c.name as company_name FROM editor_payment_batches epb
+     JOIN companies c ON c.id = epb.company_id
+     WHERE epb.editor_id = ? ORDER BY epb.created_at DESC`,
+    [uid]
+  )
+
+  // Get batch items for each
+  for (const batch of batches) {
+    batch.items = all(
+      `SELECT epi.*, o.title as order_title FROM editor_payment_items epi
+       JOIN orders o ON o.id = epi.order_id WHERE epi.batch_id = ?`,
+      [batch.id]
+    )
+  }
+
+  // Get orders with their values for this editor (across all companies)
+  const placeholder = cidList.map(() => '?').join(',')
+  const ordersSummary = all(
+    `SELECT o.id, o.title, o.editor_value, o.due_date, o.created_at, o.updated_at,
+       c.name as client_name, kc.name as column_name, comp.name as company_name
+     FROM orders o
+     JOIN clients c ON c.id = o.client_id
+     JOIN kanban_columns kc ON kc.id = o.column_id
+     JOIN companies comp ON comp.id = o.company_id
+     WHERE o.editor_id = ? AND o.company_id IN (${placeholder})
+     ORDER BY o.created_at DESC LIMIT 100`,
+    [uid, ...cidList]
+  )
+
+  const totalEarned = batches.filter(b => b.status === 'paid').reduce((s, b) => s + b.total_amount, 0)
+  const totalPending = batches.filter(b => b.status === 'pending').reduce((s, b) => s + b.total_amount, 0)
+  const totalAssigned = ordersSummary.reduce((s, o) => s + (o.editor_value || 0), 0)
+
+  res.json({
+    stats: { totalEarned, totalPending, totalAssigned, batchCount: batches.length },
+    batches,
+    orders: ordersSummary,
+  })
+})
+
+// ============ EDITOR INDIVIDUAL REPORT ============
+
+router.get('/editor/my-report', authMiddleware, requireRole('editor'), (req, res) => {
+  const uid = req.user.id
+
+  const companyIds = all(
+    "SELECT company_id FROM team_memberships WHERE user_id = ? AND status = 'active'",
+    [uid]
+  ).map(r => r.company_id)
+  companyIds.push(req.user.company_id)
+  const cidList = [...new Set(companyIds)]
+  const placeholder = cidList.map(() => '?').join(',')
+
+  const total = get(
+    `SELECT COUNT(*) as count FROM orders WHERE editor_id = ? AND company_id IN (${placeholder})`,
+    [uid, ...cidList]
+  ).count
+
+  const completed = get(
+    `SELECT COUNT(*) as count FROM orders o JOIN kanban_columns kc ON kc.id = o.column_id
+     WHERE o.editor_id = ? AND o.company_id IN (${placeholder}) AND kc.name = 'Finalizado'`,
+    [uid, ...cidList]
+  ).count
+
+  const onTime = get(
+    `SELECT COUNT(*) as count FROM orders o JOIN kanban_columns kc ON kc.id = o.column_id
+     WHERE o.editor_id = ? AND o.company_id IN (${placeholder}) AND kc.name = 'Finalizado'
+       AND (o.due_date IS NULL OR o.updated_at <= o.due_date || ' 23:59:59')`,
+    [uid, ...cidList]
+  ).count
+
+  const late = get(
+    `SELECT COUNT(*) as count FROM orders o JOIN kanban_columns kc ON kc.id = o.column_id
+     WHERE o.editor_id = ? AND o.company_id IN (${placeholder}) AND kc.name = 'Finalizado'
+       AND o.due_date IS NOT NULL AND o.updated_at > o.due_date || ' 23:59:59'`,
+    [uid, ...cidList]
+  ).count
+
+  const inProgress = get(
+    `SELECT COUNT(*) as count FROM orders o JOIN kanban_columns kc ON kc.id = o.column_id
+     WHERE o.editor_id = ? AND o.company_id IN (${placeholder}) AND kc.name NOT IN ('Finalizado', 'Não iniciado')`,
+    [uid, ...cidList]
+  ).count
+
+  const overdue = get(
+    `SELECT COUNT(*) as count FROM orders o JOIN kanban_columns kc ON kc.id = o.column_id
+     WHERE o.editor_id = ? AND o.company_id IN (${placeholder}) AND kc.name != 'Finalizado'
+       AND o.due_date < date('now') AND o.due_date IS NOT NULL`,
+    [uid, ...cidList]
+  ).count
+
+  const totalValue = get(
+    `SELECT COALESCE(SUM(editor_value), 0) as total FROM orders WHERE editor_id = ? AND company_id IN (${placeholder})`,
+    [uid, ...cidList]
+  ).total
+
+  // Monthly breakdown (last 6 months)
+  const months = []
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date()
+    d.setMonth(d.getMonth() - i)
+    const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const mCompleted = get(
+      `SELECT COUNT(*) as count FROM orders o JOIN kanban_columns kc ON kc.id = o.column_id
+       WHERE o.editor_id = ? AND o.company_id IN (${placeholder}) AND kc.name = 'Finalizado'
+         AND o.updated_at LIKE ? || '%'`,
+      [uid, ...cidList, m]
+    ).count
+    const mValue = get(
+      `SELECT COALESCE(SUM(editor_value), 0) as total FROM orders o JOIN kanban_columns kc ON kc.id = o.column_id
+       WHERE o.editor_id = ? AND o.company_id IN (${placeholder}) AND kc.name = 'Finalizado'
+         AND o.updated_at LIKE ? || '%'`,
+      [uid, ...cidList, m]
+    ).total
+    months.push({ month: m, completed: mCompleted, value: mValue })
+  }
+
+  const onTimeRate = completed > 0 ? Math.round((onTime / completed) * 100) : 0
+
+  res.json({
+    total, completed, onTime, late, inProgress, overdue, totalValue, onTimeRate,
+    months,
+  })
+})
+
+// ============ CLIENT ORDER REQUESTS (portal de solicitação) ============
+
+router.post('/client/orders', authMiddleware, requireRole('cliente'), (req, res) => {
+  const { title, description, briefing, video_type, duration, format, references_json, drive_links, priority } = req.body
+  if (!title) return res.status(400).json({ error: 'Titulo obrigatorio' })
+
+  const client = get('SELECT id, company_id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(403).json({ error: 'Cliente nao vinculado' })
+
+  const cid = client.company_id
+
+  // Check contract limits
+  const contract = get(
+    "SELECT * FROM contracts WHERE client_id = ? AND company_id = ? AND status = 'active'",
+    [client.id, cid]
+  )
+  if (contract && contract.monthly_videos > 0) {
+    const now = new Date()
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-31`
+    const monthOrders = get(
+      "SELECT COUNT(*) as count FROM orders WHERE client_id = ? AND company_id = ? AND created_at >= ? AND created_at <= ?",
+      [client.id, cid, monthStart, monthEnd + ' 23:59:59']
+    ).count
+    if (monthOrders >= contract.monthly_videos) {
+      return res.status(400).json({ error: `Limite mensal de ${contract.monthly_videos} videos atingido` })
+    }
+  }
+
+  // Put in "Não iniciado" column
+  const col = get(
+    "SELECT id FROM kanban_columns WHERE client_id = ? AND company_id = ? AND name LIKE '%ão iniciado%' ORDER BY position LIMIT 1",
+    [client.id, cid]
+  )
+  if (!col) return res.status(400).json({ error: 'Coluna nao encontrada. Contate o gestor.' })
+
+  const result = run(
+    `INSERT INTO orders (company_id, client_id, column_id, title, description, briefing, video_type, duration, format, references_json, drive_links, priority, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'client')`,
+    [cid, client.id, col.id, title, description || null, briefing || null, video_type || null, duration || null, format || null, references_json || '[]', drive_links || null, priority || 'normal']
+  )
+
+  // Notify gestor
+  const gestor = get("SELECT id FROM users WHERE company_id = ? AND role = 'gestor' LIMIT 1", [cid])
+  if (gestor) {
+    run(
+      "INSERT INTO notifications (company_id, user_id, type, title, message, reference_id, reference_type) VALUES (?, ?, 'client_request', ?, ?, ?, 'order')",
+      [cid, gestor.id, 'Nova solicitação de cliente', `${client.id ? get('SELECT name FROM clients WHERE id = ?', [client.id])?.name : 'Cliente'} solicitou: ${title}`, result.lastInsertRowid]
+    )
+  }
+
+  res.json({ id: result.lastInsertRowid, message: 'Solicitação enviada' })
+})
+
+// Client gets their contract info
+router.get('/client/contract', authMiddleware, requireRole('cliente'), (req, res) => {
+  const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente nao vinculado' })
+
+  const contract = get(
+    "SELECT * FROM contracts WHERE client_id = ? AND company_id = ? AND status = 'active'",
+    [client.id, req.user.company_id]
+  )
+  if (!contract) return res.json({ contract: null, usage: null })
+
+  const clauses = all(
+    'SELECT * FROM contract_clauses WHERE contract_id = ? ORDER BY position',
+    [contract.id]
+  )
+
+  // Monthly usage
+  const now = new Date()
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const monthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-31`
+  const used = get(
+    "SELECT COUNT(*) as count FROM orders WHERE client_id = ? AND company_id = ? AND created_at >= ? AND created_at <= ?",
+    [client.id, req.user.company_id, monthStart, monthEnd + ' 23:59:59']
+  ).count
+
+  res.json({ contract: { ...contract, clauses }, usage: { used, limit: contract.monthly_videos } })
+})
+
+// ============ CONTRACTS (gestor) ============
+
+router.get('/contracts', authMiddleware, requireRole('gestor'), (req, res) => {
+  const contracts = all(
+    `SELECT ct.*, c.name as client_name FROM contracts ct
+     JOIN clients c ON c.id = ct.client_id
+     WHERE ct.company_id = ? ORDER BY ct.created_at DESC`,
+    [req.user.company_id]
+  )
+  res.json(contracts)
+})
+
+router.get('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) => {
+  const contract = get(
+    'SELECT * FROM contracts WHERE id = ? AND company_id = ?',
+    [req.params.id, req.user.company_id]
+  )
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+
+  contract.clauses = all(
+    'SELECT * FROM contract_clauses WHERE contract_id = ? ORDER BY position',
+    [contract.id]
+  )
+  res.json(contract)
+})
+
+router.post('/contracts', authMiddleware, requireRole('gestor'), (req, res) => {
+  const { client_id, title, start_date, end_date, monthly_videos, monthly_value, notes, clauses, status } = req.body
+  if (!client_id || !title) return res.status(400).json({ error: 'Cliente e titulo obrigatorios' })
+
+  const result = run(
+    'INSERT INTO contracts (company_id, client_id, title, status, start_date, end_date, monthly_videos, monthly_value, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [req.user.company_id, client_id, title, status || 'draft', start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null]
+  )
+
+  // Insert clauses
+  if (clauses && Array.isArray(clauses)) {
+    for (let i = 0; i < clauses.length; i++) {
+      const cl = clauses[i]
+      if (cl.title && cl.content) {
+        run(
+          'INSERT INTO contract_clauses (contract_id, title, content, position) VALUES (?, ?, ?, ?)',
+          [result.lastInsertRowid, cl.title, cl.content, i]
+        )
+      }
+    }
+  }
+
+  res.json({ id: result.lastInsertRowid })
+})
+
+router.put('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) => {
+  const { title, status, start_date, end_date, monthly_videos, monthly_value, notes, clauses } = req.body
+  const id = req.params.id
+
+  const existing = get('SELECT id FROM contracts WHERE id = ? AND company_id = ?', [id, req.user.company_id])
+  if (!existing) return res.status(404).json({ error: 'Contrato nao encontrado' })
+
+  run(
+    `UPDATE contracts SET title = ?, status = ?, start_date = ?, end_date = ?, monthly_videos = ?, monthly_value = ?, notes = ? WHERE id = ?`,
+    [title, status, start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null, id]
+  )
+
+  // Replace clauses
+  if (clauses && Array.isArray(clauses)) {
+    run('DELETE FROM contract_clauses WHERE contract_id = ?', [id])
+    for (let i = 0; i < clauses.length; i++) {
+      const cl = clauses[i]
+      if (cl.title && cl.content) {
+        run(
+          'INSERT INTO contract_clauses (contract_id, title, content, position) VALUES (?, ?, ?, ?)',
+          [id, cl.title, cl.content, i]
+        )
+      }
+    }
+  }
+
+  res.json({ success: true })
+})
+
+router.delete('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) => {
+  run('DELETE FROM contracts WHERE id = ? AND company_id = ?', [req.params.id, req.user.company_id])
+  res.json({ success: true })
+})
+
+// ============ COMMENTS (accessible by editor and client too) ============
+
+router.get('/orders/:id/comments', authMiddleware, (req, res) => {
+  const orderId = req.params.id
+  const uid = req.user.id
+  const role = req.user.role
+  const cid = req.user.company_id
+
+  // Verify access
+  if (role === 'cliente') {
+    const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [uid, cid])
+    const order = get('SELECT id FROM orders WHERE id = ? AND client_id = ?', [orderId, client?.id])
+    if (!order) return res.status(403).json({ error: 'Acesso negado' })
+  } else if (role === 'editor') {
+    const order = get('SELECT id FROM orders WHERE id = ? AND editor_id = ?', [orderId, uid])
+    if (!order) return res.status(403).json({ error: 'Acesso negado' })
+  } else if (role !== 'gestor' && role !== 'admin') {
+    return res.status(403).json({ error: 'Acesso negado' })
+  }
+
+  const comments = all(
+    `SELECT c.*, u.name as user_name, u.avatar as user_avatar, u.role as user_role
+     FROM comments c JOIN users u ON u.id = c.user_id
+     WHERE c.order_id = ? ORDER BY c.created_at ASC`,
+    [orderId]
+  )
+  res.json(comments)
+})
+
+router.post('/orders/:id/comments', authMiddleware, (req, res) => {
+  const orderId = req.params.id
+  const uid = req.user.id
+  const role = req.user.role
+  const cid = req.user.company_id
+  const { text, timestamp_mark } = req.body
+  if (!text) return res.status(400).json({ error: 'Texto obrigatorio' })
+
+  // Verify access
+  let order
+  if (role === 'cliente') {
+    const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [uid, cid])
+    order = get('SELECT * FROM orders WHERE id = ? AND client_id = ?', [orderId, client?.id])
+  } else if (role === 'editor') {
+    order = get('SELECT * FROM orders WHERE id = ? AND editor_id = ?', [orderId, uid])
+  } else {
+    order = get('SELECT * FROM orders WHERE id = ? AND company_id = ?', [orderId, cid])
+  }
+  if (!order) return res.status(403).json({ error: 'Acesso negado' })
+
+  const result = run(
+    'INSERT INTO comments (order_id, user_id, text, timestamp_mark) VALUES (?, ?, ?, ?)',
+    [orderId, uid, text, timestamp_mark || null]
+  )
+
+  const user = get('SELECT name, avatar, role FROM users WHERE id = ?', [uid])
+  res.json({
+    id: result.lastInsertRowid,
+    order_id: Number(orderId),
+    user_id: uid,
+    text,
+    timestamp_mark: timestamp_mark || null,
+    user_name: user.name,
+    user_avatar: user.avatar,
+    user_role: user.role,
+    created_at: new Date().toISOString(),
+  })
 })
 
 // ============ ORDER TEMPLATES ============

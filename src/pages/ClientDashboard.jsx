@@ -1,11 +1,14 @@
-// src/pages/ClientDashboard.jsx — visao do cliente: kanban read-only + tabela + financeiro
+// src/pages/ClientDashboard.jsx — visao do cliente: kanban read-only + tabela + financeiro + portal de solicitacao
 import { useState, useEffect } from 'react'
 import api from '../api'
 import { useAuth } from '../context/AuthContext'
 import theme from '../styles/theme'
 import Modal from '../components/Modal'
+import VideoPlayer from '../components/VideoPlayer'
+import OrderComments from '../components/OrderComments'
 import {
-  Icon, Avatar, Spinner, Badge,
+  Icon, Avatar, Spinner, Badge, Field,
+  inputStyle, btnPrimary, btnGhost,
   panelStyle, PRIORITY, fmtBRL, daysUntil,
 } from '../components/ui'
 
@@ -19,12 +22,22 @@ export default function ClientDashboard() {
   const [financialLoading, setFinancialLoading] = useState(false)
   const [expandedInvoice, setExpandedInvoice] = useState(null)
   const [invoiceItems, setInvoiceItems] = useState({})
+  const [contract, setContract] = useState(null)
+  const [showRequestForm, setShowRequestForm] = useState(false)
+  const [requestForm, setRequestForm] = useState({
+    title: '', description: '', briefing: '', video_type: '', duration: '', format: '', references: '',
+  })
+  const [submittingRequest, setSubmittingRequest] = useState(false)
 
   useEffect(() => {
     async function load() {
       try {
-        const d = await api.clientPortal.getProjects()
+        const [d, c] = await Promise.all([
+          api.clientPortal.getProjects(),
+          api.clientPortal.getContract().catch(() => null),
+        ])
         setData(d)
+        setContract(c)
       } catch (err) { console.error(err) } finally { setLoading(false) }
     }
     load()
@@ -51,6 +64,30 @@ export default function ClientDashboard() {
         setInvoiceItems(prev => ({ ...prev, [invoiceId]: d }))
       } catch (err) { console.error(err) }
     }
+  }
+
+  async function handleSubmitRequest(e) {
+    e.preventDefault()
+    if (!requestForm.title.trim()) return
+    setSubmittingRequest(true)
+    try {
+      await api.clientPortal.createOrder({
+        title: requestForm.title,
+        description: requestForm.description,
+        briefing: requestForm.briefing,
+        video_type: requestForm.video_type,
+        duration: requestForm.duration,
+        format: requestForm.format,
+        references_json: requestForm.references ? JSON.stringify(requestForm.references.split('\n').filter(Boolean)) : '[]',
+      })
+      setRequestForm({ title: '', description: '', briefing: '', video_type: '', duration: '', format: '', references: '' })
+      setShowRequestForm(false)
+      // Reload data
+      const d = await api.clientPortal.getProjects()
+      setData(d)
+      const c = await api.clientPortal.getContract().catch(() => null)
+      setContract(c)
+    } catch (err) { alert(err.message) } finally { setSubmittingRequest(false) }
   }
 
   if (loading) return <Spinner />
@@ -114,6 +151,7 @@ export default function ClientDashboard() {
               { id: 'map', label: 'Mapa' },
               { id: 'table', label: 'Planilha' },
               { id: 'financial', label: 'Financeiro' },
+              { id: 'request', label: 'Solicitar' },
             ].map(t => (
               <button key={t.id} onClick={() => {
                 setTab(t.id)
@@ -256,6 +294,109 @@ export default function ClientDashboard() {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          )}
+
+          {/* Request tab — client order portal */}
+          {tab === 'request' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Contract info */}
+              {contract && (
+                <div style={{ ...panelStyle, padding: 20, display: 'flex', alignItems: 'center', gap: 20 }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="eyebrow" style={{ marginBottom: 6 }}>Seu contrato</div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: theme.colors.text }}>{contract.title}</div>
+                    <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 4 }}>
+                      {contract.monthly_videos} videos/mes · {fmtBRL(contract.monthly_value)}/mes
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div className="eyebrow" style={{ marginBottom: 4 }}>Usados este mes</div>
+                    <div className="display tnum" style={{ fontSize: 28, color: contract.used >= contract.monthly_videos ? theme.colors.danger : theme.colors.primary }}>
+                      {contract.used || 0}<span style={{ fontSize: 14, color: theme.colors.textMuted }}>/{contract.monthly_videos}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {!showRequestForm ? (
+                <div style={{ textAlign: 'center', padding: 40 }}>
+                  <button onClick={() => setShowRequestForm(true)} style={{ ...btnPrimary, padding: '14px 28px', fontSize: 14 }}>
+                    <Icon name="plus" size={16} />
+                    Nova solicitacao de video
+                  </button>
+                  <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 12 }}>
+                    Solicite um novo video e nossa equipe iniciara a producao.
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmitRequest} style={{ ...panelStyle, padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div className="eyebrow">Nova solicitacao</div>
+                  <Field label="Titulo do video" required>
+                    <input value={requestForm.title} onChange={e => setRequestForm(f => ({ ...f, title: e.target.value }))}
+                      style={inputStyle} placeholder="Ex: Video institucional Q3" />
+                  </Field>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                    <Field label="Tipo de video">
+                      <select value={requestForm.video_type} onChange={e => setRequestForm(f => ({ ...f, video_type: e.target.value }))}
+                        style={{ ...inputStyle, cursor: 'pointer' }}>
+                        <option value="">Selecionar</option>
+                        <option value="institucional">Institucional</option>
+                        <option value="social_media">Social Media</option>
+                        <option value="comercial">Comercial</option>
+                        <option value="evento">Evento</option>
+                        <option value="depoimento">Depoimento</option>
+                        <option value="animacao">Animacao</option>
+                        <option value="outro">Outro</option>
+                      </select>
+                    </Field>
+                    <Field label="Duracao estimada">
+                      <select value={requestForm.duration} onChange={e => setRequestForm(f => ({ ...f, duration: e.target.value }))}
+                        style={{ ...inputStyle, cursor: 'pointer' }}>
+                        <option value="">Selecionar</option>
+                        <option value="15s">Ate 15s</option>
+                        <option value="30s">Ate 30s</option>
+                        <option value="60s">Ate 1 min</option>
+                        <option value="3min">1-3 min</option>
+                        <option value="5min">3-5 min</option>
+                        <option value="10min+">10+ min</option>
+                      </select>
+                    </Field>
+                    <Field label="Formato">
+                      <select value={requestForm.format} onChange={e => setRequestForm(f => ({ ...f, format: e.target.value }))}
+                        style={{ ...inputStyle, cursor: 'pointer' }}>
+                        <option value="">Selecionar</option>
+                        <option value="16:9">Horizontal (16:9)</option>
+                        <option value="9:16">Vertical (9:16)</option>
+                        <option value="1:1">Quadrado (1:1)</option>
+                        <option value="4:5">Feed (4:5)</option>
+                        <option value="multiplo">Multiplos formatos</option>
+                      </select>
+                    </Field>
+                  </div>
+                  <Field label="Descricao / objetivo">
+                    <textarea value={requestForm.description} onChange={e => setRequestForm(f => ({ ...f, description: e.target.value }))}
+                      rows={3} style={{ ...inputStyle, resize: 'vertical', minHeight: 70 }}
+                      placeholder="Descreva o objetivo do video, publico-alvo, tom desejado..." />
+                  </Field>
+                  <Field label="Briefing detalhado">
+                    <textarea value={requestForm.briefing} onChange={e => setRequestForm(f => ({ ...f, briefing: e.target.value }))}
+                      rows={4} style={{ ...inputStyle, resize: 'vertical', minHeight: 80 }}
+                      placeholder="Roteiro, elementos obrigatorios, musicas, textos em tela, locucao..." />
+                  </Field>
+                  <Field label="Links de referencia (um por linha)" hint="YouTube, Instagram, Vimeo, etc.">
+                    <textarea value={requestForm.references} onChange={e => setRequestForm(f => ({ ...f, references: e.target.value }))}
+                      rows={2} style={{ ...inputStyle, resize: 'vertical', minHeight: 50, fontFamily: theme.fonts.mono, fontSize: 12 }}
+                      placeholder="https://youtube.com/watch?v=..." />
+                  </Field>
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8, borderTop: `1px solid ${theme.colors.border}` }}>
+                    <button type="button" onClick={() => setShowRequestForm(false)} style={btnGhost}>Cancelar</button>
+                    <button type="submit" disabled={submittingRequest || !requestForm.title.trim()} style={{ ...btnPrimary, opacity: submittingRequest ? 0.6 : 1 }}>
+                      {submittingRequest ? 'Enviando...' : 'Enviar solicitacao'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           )}
 
@@ -455,13 +596,14 @@ function ClientOrderCard({ order, onClick }) {
   const d = daysUntil(order.due_date)
   const overdue = d != null && d < 0
   const today = d === 0
+  const isClientOrder = order.source === 'client'
 
   return (
     <div
       onClick={onClick}
       style={{
-        background: theme.colors.panel,
-        border: `1px solid ${overdue ? 'rgba(244, 115, 131, 0.35)' : theme.colors.border}`,
+        background: isClientOrder ? 'rgba(217, 183, 112, 0.04)' : theme.colors.panel,
+        border: `1px solid ${overdue ? 'rgba(244, 115, 131, 0.35)' : isClientOrder ? 'rgba(217, 183, 112, 0.25)' : theme.colors.border}`,
         borderRadius: 10,
         padding: 12,
         position: 'relative',
@@ -470,12 +612,12 @@ function ClientOrderCard({ order, onClick }) {
         transition: 'border-color 0.12s',
       }}
       onMouseEnter={e => e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.5)' : theme.colors.borderLight}
-      onMouseLeave={e => e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.35)' : theme.colors.border}
+      onMouseLeave={e => e.currentTarget.style.borderColor = overdue ? 'rgba(244, 115, 131, 0.35)' : isClientOrder ? 'rgba(217, 183, 112, 0.25)' : theme.colors.border}
     >
       <div style={{
         position: 'absolute', left: 0, top: 0, bottom: 0, width: 2,
-        background: PRIORITY[order.priority]?.color || theme.colors.primary,
-        opacity: ['urgent', 'high'].includes(order.priority) ? 1 : 0.4,
+        background: isClientOrder ? theme.colors.gold : (PRIORITY[order.priority]?.color || theme.colors.primary),
+        opacity: isClientOrder ? 1 : (['urgent', 'high'].includes(order.priority) ? 1 : 0.4),
       }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
@@ -582,6 +724,16 @@ function ClientOrderDetail({ order, onAction }) {
               aprovado
             </span>
           )}
+          {order.source === 'client' && (
+            <span style={{
+              padding: '2px 8px', borderRadius: 4,
+              background: theme.colors.goldMuted, color: theme.colors.gold,
+              fontSize: 10, fontFamily: theme.fonts.mono, fontWeight: 600,
+              letterSpacing: '0.05em', textTransform: 'uppercase',
+            }}>
+              solicitado
+            </span>
+          )}
           {order.priority && !['normal', 'low'].includes(order.priority) && (
             <span style={{
               padding: '2px 8px',
@@ -654,6 +806,14 @@ function ClientOrderDetail({ order, onAction }) {
         </div>
       )}
 
+      {/* Video player — delivery link */}
+      {order.delivery_link && (
+        <div style={{ marginBottom: 18 }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>Video entregue</div>
+          <VideoPlayer url={order.delivery_link} />
+        </div>
+      )}
+
       {/* Drive links */}
       {order.drive_links && (
         <div style={{ marginBottom: 18 }}>
@@ -673,6 +833,11 @@ function ClientOrderDetail({ order, onAction }) {
           ))}
         </div>
       )}
+
+      {/* Comments thread */}
+      <div style={{ marginBottom: 18 }}>
+        <OrderComments orderId={order.id} maxHeight={240} />
+      </div>
 
       {/* Approve / Request changes (only show when order is in "Editado" column and not yet approved) */}
       {isEdited && !isApproved && (

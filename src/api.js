@@ -72,12 +72,24 @@ const api = {
     requestChanges: (orderId, data) => request(`/client/orders/${orderId}/request-changes`, { method: 'POST', body: JSON.stringify(data) }),
     getFinancial: () => request('/client/financial'),
     getInvoiceItems: (id) => request(`/client/invoices/${id}/items`),
+    createOrder: (data) => request('/client/orders', { method: 'POST', body: JSON.stringify(data) }),
+    getContract: () => request('/client/contract'),
   },
 
   editorPortal: {
     getDashboard: () => request('/editor/dashboard'),
     getBoard: () => request('/editor/board'),
     deliver: (orderId, data) => request(`/editor/orders/${orderId}/deliver`, { method: 'POST', body: JSON.stringify(data) }),
+    getFinancial: () => request('/editor/financial'),
+    getMyReport: () => request('/editor/my-report'),
+  },
+
+  contracts: {
+    list: () => request('/contracts'),
+    get: (id) => request(`/contracts/${id}`),
+    create: (data) => request('/contracts', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id, data) => request(`/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id) => request(`/contracts/${id}`, { method: 'DELETE' }),
   },
 
   orders: {

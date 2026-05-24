@@ -16,6 +16,9 @@ import EditorDashboard from './pages/EditorDashboard'
 import EditorBoard from './pages/EditorBoard'
 import Calendar from './pages/Calendar'
 import EditorReport from './pages/EditorReport'
+import EditorFinancial from './pages/EditorFinancial'
+import EditorMyReport from './pages/EditorMyReport'
+import Contracts from './pages/Contracts'
 import AdminDashboard from './pages/AdminDashboard'
 import LandingPage from './pages/LandingPage'
 
@@ -94,6 +97,9 @@ const AppRoutes = React.memo(function AppRoutes() {
         <Route path="financial" element={<Financial />} />
         <Route path="calendar" element={<Calendar />} />
         <Route path="reports" element={<EditorReport />} />
+        <Route path="contracts" element={<Contracts />} />
+        <Route path="editor-financial" element={<EditorFinancial />} />
+        <Route path="editor-report" element={<EditorMyReport />} />
         <Route path="admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
         <Route path="settings" element={<Settings />} />
       </Route>

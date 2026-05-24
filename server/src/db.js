@@ -452,6 +452,46 @@ async function initDb() {
     }
   } catch (e) { console.log('Subscription migration note:', e.message) }
 
+  // ============ CONTRACTS ============
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS contracts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      client_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT DEFAULT 'draft' CHECK(status IN ('draft','active','expired','cancelled')),
+      start_date DATE,
+      end_date DATE,
+      monthly_videos INTEGER DEFAULT 0,
+      monthly_value REAL DEFAULT 0,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (client_id) REFERENCES clients(id)
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS contract_clauses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contract_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      position INTEGER DEFAULT 0,
+      FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
+    )
+  `)
+
+  // ============ CLIENT ORDER REQUESTS ============
+  // Uses orders table with source field
+  try { db.run("ALTER TABLE orders ADD COLUMN source TEXT DEFAULT 'gestor'") } catch {}
+  try { db.run("ALTER TABLE orders ADD COLUMN video_type TEXT") } catch {}
+  try { db.run("ALTER TABLE orders ADD COLUMN duration TEXT") } catch {}
+  try { db.run("ALTER TABLE orders ADD COLUMN format TEXT") } catch {}
+  try { db.run("ALTER TABLE orders ADD COLUMN references_json TEXT DEFAULT '[]'") } catch {}
+  try { db.run("ALTER TABLE orders ADD COLUMN delivery_link TEXT") } catch {}
+
   // Seed default plan if none exists
   const planCount = db.exec("SELECT COUNT(*) FROM plans")[0]?.values[0][0] || 0
   if (planCount === 0) {

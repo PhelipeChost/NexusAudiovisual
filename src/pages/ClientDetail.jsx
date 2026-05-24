@@ -6,6 +6,8 @@ import api from '../api'
 import theme from '../styles/theme'
 import resizeImage from '../utils/resizeImage'
 import Modal from '../components/Modal'
+import VideoPlayer from '../components/VideoPlayer'
+import OrderComments from '../components/OrderComments'
 import {
   Icon, Avatar, Spinner, Field,
   inputStyle, btnPrimary, btnSoft, btnGhost, btnDanger,
@@ -44,6 +46,7 @@ export default function ClientDetail() {
   const [form, setForm] = useState({
     title: '', description: '', briefing: '', drive_links: '',
     priority: 'normal', due_date: '', editor_id: '', value: '', editor_value: '',
+    video_type: '', duration: '', format: '',
   })
 
   useEffect(() => { loadData(); loadTemplates() }, [id, selectedMonth])
@@ -75,7 +78,7 @@ export default function ClientDetail() {
     try {
       await api.orders.create(id, { ...form, editor_id: form.editor_id || null })
       setShowCreateModal(false)
-      setForm({ title: '', description: '', briefing: '', drive_links: '', priority: 'normal', due_date: '', editor_id: '', value: '', editor_value: '' })
+      setForm({ title: '', description: '', briefing: '', drive_links: '', priority: 'normal', due_date: '', editor_id: '', value: '', editor_value: '', video_type: '', duration: '', format: '' })
       loadData()
     } catch (err) { alert(err.message) }
   }
@@ -427,6 +430,44 @@ export default function ClientDetail() {
             <textarea value={form.briefing} onChange={e => setForm({ ...form, briefing: e.target.value })}
               placeholder="Instruções detalhadas para o editor…" rows={3} style={{ ...inputStyle, resize: 'vertical', fontFamily: theme.fonts.ui }} />
           </Field>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+            <Field label="Tipo de video">
+              <select value={form.video_type} onChange={e => setForm({ ...form, video_type: e.target.value })}
+                style={{ ...inputStyle, cursor: 'pointer' }}>
+                <option value="">Selecionar</option>
+                <option value="institucional">Institucional</option>
+                <option value="social_media">Social Media</option>
+                <option value="comercial">Comercial</option>
+                <option value="evento">Evento</option>
+                <option value="depoimento">Depoimento</option>
+                <option value="animacao">Animacao</option>
+                <option value="outro">Outro</option>
+              </select>
+            </Field>
+            <Field label="Duracao estimada">
+              <select value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })}
+                style={{ ...inputStyle, cursor: 'pointer' }}>
+                <option value="">Selecionar</option>
+                <option value="15s">Ate 15s</option>
+                <option value="30s">Ate 30s</option>
+                <option value="60s">Ate 1 min</option>
+                <option value="3min">1-3 min</option>
+                <option value="5min">3-5 min</option>
+                <option value="10min+">10+ min</option>
+              </select>
+            </Field>
+            <Field label="Formato">
+              <select value={form.format} onChange={e => setForm({ ...form, format: e.target.value })}
+                style={{ ...inputStyle, cursor: 'pointer' }}>
+                <option value="">Selecionar</option>
+                <option value="16:9">Horizontal (16:9)</option>
+                <option value="9:16">Vertical (9:16)</option>
+                <option value="1:1">Quadrado (1:1)</option>
+                <option value="4:5">Feed (4:5)</option>
+                <option value="multiplo">Multiplos formatos</option>
+              </select>
+            </Field>
+          </div>
           <Field label="Links do Drive">
             <input value={form.drive_links} onChange={e => setForm({ ...form, drive_links: e.target.value })}
               placeholder="https://drive.google.com/…" style={inputStyle} />
@@ -645,18 +686,32 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
         <div style={{ fontSize: 13, color: theme.colors.text, lineHeight: 1.35, fontWeight: 500 }}>
           {order.title}
         </div>
-        {order.priority && !['normal', 'low'].includes(order.priority) && (
-          <span style={{
-            padding: '2px 6px',
-            background: PRIORITY[order.priority].soft,
-            color: PRIORITY[order.priority].color,
-            fontSize: 9, fontFamily: theme.fonts.mono, fontWeight: 600,
-            letterSpacing: '0.06em', textTransform: 'uppercase',
-            borderRadius: 3, flexShrink: 0,
-          }}>
-            {PRIORITY[order.priority].label}
-          </span>
-        )}
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          {order.source === 'client' && (
+            <span style={{
+              padding: '2px 6px',
+              background: theme.colors.goldMuted,
+              color: theme.colors.gold,
+              fontSize: 9, fontFamily: theme.fonts.mono, fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+              borderRadius: 3,
+            }}>
+              solicitado
+            </span>
+          )}
+          {order.priority && !['normal', 'low'].includes(order.priority) && (
+            <span style={{
+              padding: '2px 6px',
+              background: PRIORITY[order.priority].soft,
+              color: PRIORITY[order.priority].color,
+              fontSize: 9, fontFamily: theme.fonts.mono, fontWeight: 600,
+              letterSpacing: '0.06em', textTransform: 'uppercase',
+              borderRadius: 3,
+            }}>
+              {PRIORITY[order.priority].label}
+            </span>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: theme.colors.textMuted, flexWrap: 'wrap' }}>
@@ -971,6 +1026,14 @@ function OrderDetail({
                   {order.briefing}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Video player — delivery link */}
+          {order.delivery_link && (
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>Video entregue</div>
+              <VideoPlayer url={order.delivery_link} height={300} />
             </div>
           )}
 

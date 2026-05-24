@@ -2,6 +2,9 @@
 import { useState, useEffect, useRef } from 'react'
 import api from '../api'
 import theme from '../styles/theme'
+import Modal from '../components/Modal'
+import VideoPlayer from '../components/VideoPlayer'
+import OrderComments from '../components/OrderComments'
 import {
   Icon, Avatar, Spinner,
   panelStyle, PRIORITY, fmtBRL, daysUntil,
@@ -22,6 +25,7 @@ export default function EditorBoard() {
   const [loading, setLoading] = useState(true)
   const [selectedClient, setSelectedClient] = useState(null)
   const [dragOverCol, setDragOverCol] = useState(null)
+  const [detailOrder, setDetailOrder] = useState(null)
   const dragItem = useRef(null)
 
   useEffect(() => { loadData() }, [])
@@ -205,6 +209,7 @@ export default function EditorBoard() {
                     onDragStart={e => handleDragStart(e, order, column.name)}
                     onDragEnd={handleDragEnd}
                     onDeliver={handleDeliver}
+                    onDetail={() => setDetailOrder({ ...order, column_name: column.name, column_color: column.color })}
                   />
                 ))}
                 {colOrders.length === 0 && !locked && (
@@ -222,11 +227,16 @@ export default function EditorBoard() {
           )
         })}
       </div>
+
+      {/* Order detail modal */}
+      <Modal open={!!detailOrder} onClose={() => setDetailOrder(null)} width={580}>
+        {detailOrder && <EditorOrderDetail order={detailOrder} />}
+      </Modal>
     </div>
   )
 }
 
-function EditorOrderCard({ order, locked, onDragStart, onDragEnd, onDeliver }) {
+function EditorOrderCard({ order, locked, onDragStart, onDragEnd, onDeliver, onDetail }) {
   const d = daysUntil(order.due_date)
   const overdue = d != null && d < 0
   const today = d === 0
@@ -264,7 +274,7 @@ function EditorOrderCard({ order, locked, onDragStart, onDragEnd, onDeliver }) {
       }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
-        <div style={{ fontSize: 13, color: theme.colors.text, lineHeight: 1.35, fontWeight: 500 }}>
+        <div onClick={e => { e.stopPropagation(); onDetail && onDetail() }} style={{ fontSize: 13, color: theme.colors.text, lineHeight: 1.35, fontWeight: 500, cursor: 'pointer' }}>
           {order.title}
         </div>
         {order.priority && !['normal', 'low'].includes(order.priority) && (
@@ -371,6 +381,134 @@ function EditorOrderCard({ order, locked, onDragStart, onDragEnd, onDeliver }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function EditorOrderDetail({ order }) {
+  const d = daysUntil(order.due_date)
+  const overdue = d != null && d < 0
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Header */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+          <span className="eyebrow">pedido #{order.id}</span>
+          {order.column_name && (
+            <span style={{
+              padding: '2px 8px', borderRadius: 4,
+              background: (order.column_color || theme.colors.primary) + '22',
+              color: order.column_color || theme.colors.primary,
+              fontSize: 11, fontFamily: theme.fonts.mono, fontWeight: 500,
+            }}>
+              {order.column_name}
+            </span>
+          )}
+          {order.source === 'client' && (
+            <span style={{
+              padding: '2px 8px', borderRadius: 4,
+              background: 'rgba(217,183,112,0.14)', color: theme.colors.gold,
+              fontSize: 10, fontFamily: theme.fonts.mono, fontWeight: 600,
+              letterSpacing: '0.05em', textTransform: 'uppercase',
+            }}>
+              solicitado pelo cliente
+            </span>
+          )}
+        </div>
+        <h2 className="display" style={{ fontSize: 26, lineHeight: 1.1, color: theme.colors.text, margin: 0 }}>
+          {order.title}
+        </h2>
+      </div>
+
+      {/* Info strip */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+        padding: '12px 0',
+        borderTop: `1px solid ${theme.colors.border}`,
+        borderBottom: `1px solid ${theme.colors.border}`,
+      }}>
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>Prazo</div>
+          <div style={{ fontSize: 13, color: overdue ? theme.colors.danger : theme.colors.text }} className="tnum">
+            {order.due_date ? new Date(order.due_date).toLocaleDateString('pt-BR') : '---'}
+            {overdue && <span style={{ marginLeft: 4, fontSize: 10, color: theme.colors.danger }}>{Math.abs(d)}d</span>}
+          </div>
+        </div>
+        <div style={{ paddingLeft: 14, borderLeft: `1px solid ${theme.colors.border}` }}>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>Valor editor</div>
+          <div className="mono tnum" style={{ fontSize: 14, fontWeight: 600, color: order.editor_value > 0 ? theme.colors.mint : theme.colors.textFaint }}>
+            {order.editor_value > 0 ? fmtBRL(order.editor_value) : '---'}
+          </div>
+        </div>
+        <div style={{ paddingLeft: 14, borderLeft: `1px solid ${theme.colors.border}` }}>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>Prioridade</div>
+          <span style={{
+            padding: '2px 6px', borderRadius: 3,
+            background: PRIORITY[order.priority]?.soft || theme.colors.bgSecondary,
+            color: PRIORITY[order.priority]?.color || theme.colors.textMuted,
+            fontSize: 10, fontFamily: theme.fonts.mono, fontWeight: 600, textTransform: 'uppercase',
+          }}>
+            {PRIORITY[order.priority]?.label || 'Normal'}
+          </span>
+        </div>
+      </div>
+
+      {/* Briefing / Description */}
+      {order.briefing && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Briefing</div>
+          <div style={{
+            padding: 12, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+            borderRadius: 8, fontSize: 13, color: theme.colors.textSecondary,
+            lineHeight: 1.6, whiteSpace: 'pre-wrap',
+          }}>
+            {order.briefing}
+          </div>
+        </div>
+      )}
+      {order.description && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Descricao</div>
+          <div style={{
+            padding: 12, background: theme.colors.bg, border: `1px solid ${theme.colors.border}`,
+            borderRadius: 8, fontSize: 13, color: theme.colors.textSecondary,
+            lineHeight: 1.6, whiteSpace: 'pre-wrap',
+          }}>
+            {order.description}
+          </div>
+        </div>
+      )}
+
+      {/* Video player */}
+      {order.delivery_link && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Video entregue</div>
+          <VideoPlayer url={order.delivery_link} height={280} />
+        </div>
+      )}
+
+      {/* Drive links */}
+      {order.drive_links && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Links de material</div>
+          {order.drive_links.split('\n').filter(Boolean).map((link, i) => (
+            <a key={i} href={link} target="_blank" rel="noopener noreferrer" style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 10px', background: theme.colors.bg,
+              border: `1px solid ${theme.colors.border}`, borderRadius: 6,
+              fontSize: 12, color: theme.colors.primary, wordBreak: 'break-all',
+              marginBottom: 4,
+            }}>
+              <Icon name="link" size={11} stroke />
+              <span style={{ flex: 1 }}>{link}</span>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {/* Comments */}
+      <OrderComments orderId={order.id} maxHeight={260} />
     </div>
   )
 }

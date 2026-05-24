@@ -13,9 +13,12 @@ export function useSidebar() { return useContext(SidebarContext) }
 const ALL_NAV_ITEMS = [
   { path: '/dashboard', label: 'Panorama',      icon: 'dashboard', roles: ['gestor', 'editor', 'cliente', 'admin'], end: true },
   { path: '/dashboard/board', label: 'Mapa',     icon: 'film', roles: ['editor'] },
+  { path: '/dashboard/editor-financial', label: 'Financeiro', icon: 'financial', roles: ['editor'] },
+  { path: '/dashboard/editor-report', label: 'Relatorio', icon: 'briefcase', roles: ['editor'] },
   { path: '/dashboard/clients', label: 'Clientes', icon: 'clients', roles: ['gestor'] },
   { path: '/dashboard/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
   { path: '/dashboard/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
+  { path: '/dashboard/contracts', label: 'Contratos', icon: 'briefcase', roles: ['gestor'] },
   { path: '/dashboard/calendar', label: 'Calendario', icon: 'calendar', roles: ['gestor'] },
   { path: '/dashboard/reports', label: 'Relatorios', icon: 'briefcase', roles: ['gestor'] },
   { path: '/dashboard/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente'] },
