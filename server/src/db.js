@@ -483,6 +483,22 @@ async function initDb() {
     )
   `)
 
+  // ============ CONTRACT PARTY FIELDS ============
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratante_nome TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratante_doc TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratante_endereco TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratado_nome TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratado_doc TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contratado_endereco TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN payment_value REAL DEFAULT 0") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN payment_date TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN payment_details TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN city TEXT") } catch {}
+  try { db.run("ALTER TABLE contracts ADD COLUMN contract_date TEXT") } catch {}
+
+  // Sub-items for clauses (a, b, c...)
+  try { db.run("ALTER TABLE contract_clauses ADD COLUMN items_json TEXT DEFAULT '[]'") } catch {}
+
   // ============ CLIENT ORDER REQUESTS ============
   // Uses orders table with source field
   try { db.run("ALTER TABLE orders ADD COLUMN source TEXT DEFAULT 'gestor'") } catch {}

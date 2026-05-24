@@ -2029,7 +2029,7 @@ router.get('/client/contract', authMiddleware, requireRole('cliente'), (req, res
 router.get('/contracts', authMiddleware, requireRole('gestor'), (req, res) => {
   const contracts = all(
     `SELECT ct.*, c.name as client_name FROM contracts ct
-     JOIN clients c ON c.id = ct.client_id
+     LEFT JOIN clients c ON c.id = ct.client_id
      WHERE ct.company_id = ? ORDER BY ct.created_at DESC`,
     [req.user.company_id]
   )
@@ -2051,22 +2051,33 @@ router.get('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) =
 })
 
 router.post('/contracts', authMiddleware, requireRole('gestor'), (req, res) => {
-  const { client_id, title, start_date, end_date, monthly_videos, monthly_value, notes, clauses, status } = req.body
-  if (!client_id || !title) return res.status(400).json({ error: 'Cliente e titulo obrigatorios' })
+  const {
+    client_id, title, start_date, end_date, monthly_videos, monthly_value, notes, clauses, status,
+    contratante_nome, contratante_doc, contratante_endereco,
+    contratado_nome, contratado_doc, contratado_endereco,
+    payment_value, payment_date, payment_details, city, contract_date,
+  } = req.body
+  if (!title) return res.status(400).json({ error: 'Titulo obrigatorio' })
 
   const result = run(
-    'INSERT INTO contracts (company_id, client_id, title, status, start_date, end_date, monthly_videos, monthly_value, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [req.user.company_id, client_id, title, status || 'draft', start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null]
+    `INSERT INTO contracts (company_id, client_id, title, status, start_date, end_date, monthly_videos, monthly_value, notes,
+     contratante_nome, contratante_doc, contratante_endereco, contratado_nome, contratado_doc, contratado_endereco,
+     payment_value, payment_date, payment_details, city, contract_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [req.user.company_id, client_id || null, title, status || 'draft', start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null,
+     contratante_nome || null, contratante_doc || null, contratante_endereco || null,
+     contratado_nome || null, contratado_doc || null, contratado_endereco || null,
+     payment_value || 0, payment_date || null, payment_details || null, city || null, contract_date || null]
   )
 
   // Insert clauses
   if (clauses && Array.isArray(clauses)) {
     for (let i = 0; i < clauses.length; i++) {
       const cl = clauses[i]
-      if (cl.title && cl.content) {
+      if (cl.title) {
         run(
-          'INSERT INTO contract_clauses (contract_id, title, content, position) VALUES (?, ?, ?, ?)',
-          [result.lastInsertRowid, cl.title, cl.content, i]
+          'INSERT INTO contract_clauses (contract_id, title, content, position, items_json) VALUES (?, ?, ?, ?, ?)',
+          [result.lastInsertRowid, cl.title, cl.content || '', i, JSON.stringify(cl.items || [])]
         )
       }
     }
@@ -2076,15 +2087,27 @@ router.post('/contracts', authMiddleware, requireRole('gestor'), (req, res) => {
 })
 
 router.put('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) => {
-  const { title, status, start_date, end_date, monthly_videos, monthly_value, notes, clauses } = req.body
+  const {
+    title, status, start_date, end_date, monthly_videos, monthly_value, notes, clauses, client_id,
+    contratante_nome, contratante_doc, contratante_endereco,
+    contratado_nome, contratado_doc, contratado_endereco,
+    payment_value, payment_date, payment_details, city, contract_date,
+  } = req.body
   const id = req.params.id
 
   const existing = get('SELECT id FROM contracts WHERE id = ? AND company_id = ?', [id, req.user.company_id])
   if (!existing) return res.status(404).json({ error: 'Contrato nao encontrado' })
 
   run(
-    `UPDATE contracts SET title = ?, status = ?, start_date = ?, end_date = ?, monthly_videos = ?, monthly_value = ?, notes = ? WHERE id = ?`,
-    [title, status, start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null, id]
+    `UPDATE contracts SET title = ?, status = ?, start_date = ?, end_date = ?, monthly_videos = ?, monthly_value = ?, notes = ?,
+     client_id = ?, contratante_nome = ?, contratante_doc = ?, contratante_endereco = ?,
+     contratado_nome = ?, contratado_doc = ?, contratado_endereco = ?,
+     payment_value = ?, payment_date = ?, payment_details = ?, city = ?, contract_date = ?
+     WHERE id = ?`,
+    [title, status, start_date || null, end_date || null, monthly_videos || 0, monthly_value || 0, notes || null,
+     client_id || null, contratante_nome || null, contratante_doc || null, contratante_endereco || null,
+     contratado_nome || null, contratado_doc || null, contratado_endereco || null,
+     payment_value || 0, payment_date || null, payment_details || null, city || null, contract_date || null, id]
   )
 
   // Replace clauses
@@ -2092,10 +2115,10 @@ router.put('/contracts/:id', authMiddleware, requireRole('gestor'), (req, res) =
     run('DELETE FROM contract_clauses WHERE contract_id = ?', [id])
     for (let i = 0; i < clauses.length; i++) {
       const cl = clauses[i]
-      if (cl.title && cl.content) {
+      if (cl.title) {
         run(
-          'INSERT INTO contract_clauses (contract_id, title, content, position) VALUES (?, ?, ?, ?)',
-          [id, cl.title, cl.content, i]
+          'INSERT INTO contract_clauses (contract_id, title, content, position, items_json) VALUES (?, ?, ?, ?, ?)',
+          [id, cl.title, cl.content || '', i, JSON.stringify(cl.items || [])]
         )
       }
     }
