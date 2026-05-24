@@ -81,16 +81,27 @@ export default function Contracts() {
     } catch (err) { console.error(err) } finally { setLoading(false) }
   }
 
+  // Parse items_json — supports both old format (array of strings) and new format (array of {text, subtopics})
+  function parseTopics(itemsJson) {
+    if (!itemsJson) return []
+    const parsed = typeof itemsJson === 'string' ? JSON.parse(itemsJson) : itemsJson
+    if (!Array.isArray(parsed)) return []
+    if (parsed.length > 0 && typeof parsed[0] === 'string') {
+      return parsed.map(text => ({ text, subtopics: [] }))
+    }
+    return parsed.map(t => ({ text: t.text || '', subtopics: t.subtopics || [] }))
+  }
+
   async function openDetail(contract) {
     setDetailLoading(true)
     setDetailContract(contract)
     try {
       const full = await api.contracts.get(contract.id)
-      // Parse items_json in clauses
+      // Parse items_json in clauses to new 3-level format
       if (full.clauses) {
         full.clauses = full.clauses.map(cl => ({
           ...cl,
-          items: cl.items_json ? JSON.parse(cl.items_json) : [],
+          topics: parseTopics(cl.items_json),
         }))
       }
       setDetailContract(full)
@@ -252,12 +263,24 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
   const [saving, setSaving] = useState(false)
   const [loadingClauses, setLoadingClauses] = useState(!!editing)
 
+  // Parse items_json — supports both old format (array of strings) and new format (array of {text, subtopics})
+  function parseClauseItems(itemsJson) {
+    if (!itemsJson) return []
+    const parsed = typeof itemsJson === 'string' ? JSON.parse(itemsJson) : itemsJson
+    if (!Array.isArray(parsed)) return []
+    // Migrate old format: if first element is a string, convert to new format
+    if (parsed.length > 0 && typeof parsed[0] === 'string') {
+      return parsed.map(text => ({ text, subtopics: [] }))
+    }
+    return parsed.map(t => ({ text: t.text || '', subtopics: t.subtopics || [] }))
+  }
+
   useEffect(() => {
     if (editing) {
       api.contracts.get(editing.id).then(full => {
         const parsed = (full.clauses || []).map(cl => ({
           ...cl,
-          items: cl.items_json ? JSON.parse(cl.items_json) : [],
+          topics: parseClauseItems(cl.items_json),
         }))
         setClauses(parsed)
         // Update form with full data
@@ -287,7 +310,7 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
   }, [editing])
 
   function addClause() {
-    setClauses(prev => [...prev, { title: '', content: '', items: [], position: prev.length + 1 }])
+    setClauses(prev => [...prev, { title: '', content: '', topics: [], position: prev.length + 1 }])
   }
 
   function updateClause(idx, field, value) {
@@ -306,22 +329,50 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
     setClauses(newClauses.map((c, i) => ({ ...c, position: i + 1 })))
   }
 
-  // Sub-items (a, b, c...)
-  function addItem(clauseIdx) {
-    setClauses(prev => prev.map((c, i) => i === clauseIdx ? { ...c, items: [...c.items, ''] } : c))
+  // Topics (1.1, 1.2, 1.3...)
+  function addTopic(clauseIdx) {
+    setClauses(prev => prev.map((c, i) => i === clauseIdx ? { ...c, topics: [...(c.topics || []), { text: '', subtopics: [] }] } : c))
   }
-  function updateItem(clauseIdx, itemIdx, value) {
+  function updateTopic(clauseIdx, topicIdx, value) {
     setClauses(prev => prev.map((c, i) => {
       if (i !== clauseIdx) return c
-      const items = [...c.items]
-      items[itemIdx] = value
-      return { ...c, items }
+      const topics = [...(c.topics || [])]
+      topics[topicIdx] = { ...topics[topicIdx], text: value }
+      return { ...c, topics }
     }))
   }
-  function removeItem(clauseIdx, itemIdx) {
+  function removeTopic(clauseIdx, topicIdx) {
     setClauses(prev => prev.map((c, i) => {
       if (i !== clauseIdx) return c
-      return { ...c, items: c.items.filter((_, j) => j !== itemIdx) }
+      return { ...c, topics: (c.topics || []).filter((_, j) => j !== topicIdx) }
+    }))
+  }
+
+  // Subtopics (bullets within a topic)
+  function addSubtopic(clauseIdx, topicIdx) {
+    setClauses(prev => prev.map((c, i) => {
+      if (i !== clauseIdx) return c
+      const topics = [...(c.topics || [])]
+      topics[topicIdx] = { ...topics[topicIdx], subtopics: [...(topics[topicIdx].subtopics || []), ''] }
+      return { ...c, topics }
+    }))
+  }
+  function updateSubtopic(clauseIdx, topicIdx, subIdx, value) {
+    setClauses(prev => prev.map((c, i) => {
+      if (i !== clauseIdx) return c
+      const topics = [...(c.topics || [])]
+      const subtopics = [...(topics[topicIdx].subtopics || [])]
+      subtopics[subIdx] = value
+      topics[topicIdx] = { ...topics[topicIdx], subtopics }
+      return { ...c, topics }
+    }))
+  }
+  function removeSubtopic(clauseIdx, topicIdx, subIdx) {
+    setClauses(prev => prev.map((c, i) => {
+      if (i !== clauseIdx) return c
+      const topics = [...(c.topics || [])]
+      topics[topicIdx] = { ...topics[topicIdx], subtopics: (topics[topicIdx].subtopics || []).filter((_, j) => j !== subIdx) }
+      return { ...c, topics }
     }))
   }
 
@@ -339,7 +390,7 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
         clauses: clauses.map((c, i) => ({
           title: c.title,
           content: c.content || '',
-          items: c.items || [],
+          items: (c.topics || []).map(t => ({ text: t.text || '', subtopics: t.subtopics || [] })),
           position: i + 1,
         })),
       }
@@ -452,7 +503,7 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, color: theme.colors.textMuted }}>
-              Clausulas numeradas com sub-topicos (1.1, 1.2, 1.3...)
+              Estrutura: Clausula &rarr; Topicos (1.1, 1.2) &rarr; Subtopicos (bullets)
             </span>
             <button type="button" onClick={addClause} style={{ ...btnGhost, padding: '6px 12px', fontSize: 12 }}>
               <Icon name="plus" size={12} /> Adicionar clausula
@@ -460,7 +511,7 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
           </div>
 
           {loadingClauses ? <Spinner size={24} /> : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 500, overflowY: 'auto', paddingRight: 4 }}>
               {clauses.map((clause, idx) => (
                 <div key={idx} style={{
                   padding: 14, background: theme.colors.bg,
@@ -468,8 +519,8 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
                 }}>
                   {/* Clause header */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <span className="mono" style={{ fontSize: 12, color: theme.colors.primary, fontWeight: 700, minWidth: 32 }}>
-                      {idx + 1}&#170;
+                    <span className="mono" style={{ fontSize: 12, color: theme.colors.primary, fontWeight: 700, minWidth: 50 }}>
+                      CL. {idx + 1}&#170;
                     </span>
                     <input
                       value={clause.title}
@@ -491,41 +542,74 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
                     </button>
                   </div>
 
-                  {/* Clause body text */}
+                  {/* Clause body text (optional intro text) */}
                   <textarea
                     value={clause.content}
                     onChange={e => updateClause(idx, 'content', e.target.value)}
-                    placeholder={`Texto principal da clausula ${idx + 1}...`}
+                    placeholder={`Texto introdutorio da clausula (opcional)...`}
                     rows={2}
-                    style={{ ...inputStyle, fontSize: 12.5, resize: 'vertical', minHeight: 45, marginBottom: 8 }}
+                    style={{ ...inputStyle, fontSize: 12.5, resize: 'vertical', minHeight: 40, marginBottom: 10 }}
                   />
 
-                  {/* Sub-topics (numbered: 1.1, 1.2, 1.3...) */}
-                  {clause.items && clause.items.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8, paddingLeft: 16 }}>
-                      {clause.items.map((item, itemIdx) => (
-                        <div key={itemIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                          <span className="mono" style={{ fontSize: 11, color: theme.colors.gold, fontWeight: 600, marginTop: 8, minWidth: 28 }}>
-                            {idx + 1}.{itemIdx + 1}
-                          </span>
-                          <textarea
-                            value={item}
-                            onChange={e => updateItem(idx, itemIdx, e.target.value)}
-                            placeholder={`Subtopico ${idx + 1}.${itemIdx + 1}...`}
-                            rows={1}
-                            style={{ ...inputStyle, flex: 1, fontSize: 12, padding: '6px 10px', resize: 'vertical', minHeight: 32 }}
-                          />
-                          <button type="button" onClick={() => removeItem(idx, itemIdx)}
-                            style={{ padding: 3, border: 'none', background: 'transparent', color: theme.colors.danger, cursor: 'pointer', marginTop: 5 }}>
-                            <Icon name="x" size={10} />
+                  {/* Topics (numbered: 1.1, 1.2, 1.3...) */}
+                  {(clause.topics || []).length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8, paddingLeft: 12, borderLeft: `2px solid ${theme.colors.border}` }}>
+                      {(clause.topics || []).map((topic, topicIdx) => (
+                        <div key={topicIdx}>
+                          {/* Topic row */}
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                            <span className="mono" style={{ fontSize: 11.5, color: theme.colors.gold, fontWeight: 700, marginTop: 8, minWidth: 30 }}>
+                              {idx + 1}.{topicIdx + 1}
+                            </span>
+                            <textarea
+                              value={topic.text}
+                              onChange={e => updateTopic(idx, topicIdx, e.target.value)}
+                              placeholder={`Topico ${idx + 1}.${topicIdx + 1} - texto...`}
+                              rows={1}
+                              style={{ ...inputStyle, flex: 1, fontSize: 12, padding: '6px 10px', resize: 'vertical', minHeight: 32 }}
+                            />
+                            <button type="button" onClick={() => removeTopic(idx, topicIdx)}
+                              style={{ padding: 3, border: 'none', background: 'transparent', color: theme.colors.danger, cursor: 'pointer', marginTop: 5 }}>
+                              <Icon name="x" size={11} />
+                            </button>
+                          </div>
+
+                          {/* Subtopics (bullets within this topic) */}
+                          {(topic.subtopics || []).length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6, paddingLeft: 36 }}>
+                              {topic.subtopics.map((sub, subIdx) => (
+                                <div key={subIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                                  <span style={{ fontSize: 13, color: theme.colors.textMuted, marginTop: 6, minWidth: 10 }}>*</span>
+                                  <textarea
+                                    value={sub}
+                                    onChange={e => updateSubtopic(idx, topicIdx, subIdx, e.target.value)}
+                                    placeholder="Subtopico (item da lista)..."
+                                    rows={1}
+                                    style={{ ...inputStyle, flex: 1, fontSize: 11.5, padding: '5px 9px', resize: 'vertical', minHeight: 28 }}
+                                  />
+                                  <button type="button" onClick={() => removeSubtopic(idx, topicIdx, subIdx)}
+                                    style={{ padding: 2, border: 'none', background: 'transparent', color: theme.colors.danger, cursor: 'pointer', marginTop: 4 }}>
+                                    <Icon name="x" size={9} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Add subtopic button */}
+                          <button type="button" onClick={() => addSubtopic(idx, topicIdx)}
+                            style={{ fontSize: 10.5, color: theme.colors.textMuted, background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', marginLeft: 36, marginTop: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <Icon name="plus" size={9} /> subtopico
                           </button>
                         </div>
                       ))}
                     </div>
                   )}
-                  <button type="button" onClick={() => addItem(idx)}
-                    style={{ fontSize: 11, color: theme.colors.primary, background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Icon name="plus" size={10} /> Adicionar subtopico ({idx + 1}.{(clause.items || []).length + 1})
+
+                  {/* Add topic button */}
+                  <button type="button" onClick={() => addTopic(idx)}
+                    style={{ fontSize: 11, color: theme.colors.primary, background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <Icon name="plus" size={10} /> Adicionar topico ({idx + 1}.{(clause.topics || []).length + 1})
                   </button>
                 </div>
               ))}
@@ -541,35 +625,41 @@ function ContractForm({ editing, clients, onSave, onCancel }) {
           {clauses.length === 0 && (
             <button type="button" onClick={() => {
               setClauses([
-                { title: 'OBJETO E VIGENCIA', content: '', items: [
-                  'O presente contrato tem por objeto a parceria entre o CONTRATANTE e o CONTRATADO para a prestacao de servico de edicao de video.',
-                  'Ao final do periodo de vigencia, este contrato podera ser renovado em ate 60 (sessenta dias).',
+                { title: 'OBJETO E VIGENCIA', content: '', topics: [
+                  { text: 'O presente contrato tem por objeto a parceria entre o CONTRATANTE e o CONTRATADO para a prestacao de servico de edicao de video.', subtopics: [] },
+                  { text: 'O pacote mensal contempla:', subtopics: [
+                    'Ate 16 (dezesseis) videos mensais, sendo aproximadamente 4 (quatro) videos por semana;',
+                    'Producao minima de 3 (tres) reels, shorts ou cortes virais derivados de cada video principal;',
+                    'Adaptacao dos cortes para outras plataformas digitais quando necessario.',
+                  ]},
+                  { text: 'Ao final do periodo de vigencia, este contrato podera ser renovado em ate 60 (sessenta dias).', subtopics: [] },
                 ], position: 1 },
-                { title: 'RESPONSABILIDADES DO CONTRATANTE', content: 'O CONTRATANTE se responsabiliza por:', items: [
-                  'Fornecer todas as informacoes necessarias a realizacao dos servicos;',
-                  'Efetuar o pagamento, nas datas e nos termos definidos neste contrato;',
-                  'Comunicar imediatamente o CONTRATADO sobre eventuais reclamacoes;',
+                { title: 'RESPONSABILIDADES DO CONTRATANTE', content: 'O CONTRATANTE se responsabiliza por:', topics: [
+                  { text: 'Fornecer todas as informacoes necessarias a realizacao dos servicos;', subtopics: [] },
+                  { text: 'Efetuar o pagamento, nas datas e nos termos definidos neste contrato;', subtopics: [] },
+                  { text: 'Comunicar imediatamente o CONTRATADO sobre eventuais reclamacoes;', subtopics: [] },
                 ], position: 2 },
-                { title: 'RESPONSABILIDADES DO CONTRATADO', content: 'O CONTRATADO se compromete a:', items: [
-                  'Prestar, com a devida dedicacao, os servicos descritos neste contrato;',
-                  'Manter sigilosas as informacoes privilegiadas de qualquer natureza;',
-                  'Providenciar os meios e equipamentos necessarios a correta execucao do servico;',
-                  'Manter sigilo absoluto sobre quaisquer informacoes, materiais, videos, estrategias e dados sensiveis;',
+                { title: 'RESPONSABILIDADES DO CONTRATADO', content: 'O CONTRATADO se compromete a:', topics: [
+                  { text: 'Prestar, com a devida dedicacao, os servicos descritos neste contrato;', subtopics: [] },
+                  { text: 'Manter sigilosas as informacoes privilegiadas de qualquer natureza;', subtopics: [] },
+                  { text: 'Providenciar os meios e equipamentos necessarios a correta execucao do servico;', subtopics: [] },
+                  { text: 'Manter sigilo absoluto sobre quaisquer informacoes, materiais, videos, estrategias e dados sensiveis;', subtopics: [] },
                 ], position: 3 },
-                { title: 'REMUNERACAO', content: '', items: [
-                  'Pelo servico contratado, pagara o CONTRATANTE ao CONTRATADO o valor acordado na data definida.',
-                  'Em caso de atraso no pagamento devera incidir multa de 10% sobre o valor devido.',
+                { title: 'REMUNERACAO', content: '', topics: [
+                  { text: 'Pela prestacao dos servicos descritos neste contrato, a CONTRATANTE pagara ao CONTRATADO o valor acordado mensalmente.', subtopics: [] },
+                  { text: 'Demandas adicionais nao previstas neste contrato poderao ser cobradas separadamente mediante aprovacao previa da CONTRATANTE.', subtopics: [] },
+                  { text: 'Em caso de atraso no pagamento devera incidir multa de 10% sobre o valor devido.', subtopics: [] },
                 ], position: 4 },
-                { title: 'RESCISAO', content: '', items: [
-                  'A qualquer momento, poderao as partes rescindir este contrato, com antecedencia minima de 07 (sete) dias.',
-                  'Em caso de rescisao, o pagamento devera ser feito proporcionalmente aos dias trabalhados.',
+                { title: 'RESCISAO', content: '', topics: [
+                  { text: 'A qualquer momento, poderao as partes rescindir este contrato, com antecedencia minima de 07 (sete) dias.', subtopics: [] },
+                  { text: 'Em caso de rescisao, o pagamento devera ser feito proporcionalmente aos dias trabalhados.', subtopics: [] },
                 ], position: 5 },
-                { title: 'CONDICOES GERAIS', content: '', items: [
-                  'Este contrato podera ser alterado mediante acordo mutuo entre as partes, formalizado por escrito.',
-                  'Este contrato tem natureza estritamente civil e nao gera vinculo empregaticio entre as partes.',
+                { title: 'CONDICOES GERAIS', content: '', topics: [
+                  { text: 'Este contrato podera ser alterado mediante acordo mutuo entre as partes, formalizado por escrito.', subtopics: [] },
+                  { text: 'Este contrato tem natureza estritamente civil e nao gera vinculo empregaticio entre as partes.', subtopics: [] },
                 ], position: 6 },
-                { title: 'FORO', content: '', items: [
-                  'Fica eleito o foro central da Comarca para dirimir quaisquer duvidas ou litigios oriundos deste contrato.',
+                { title: 'FORO', content: '', topics: [
+                  { text: 'Fica eleito o foro central da Comarca para dirimir quaisquer duvidas ou litigios oriundos deste contrato.', subtopics: [] },
                 ], position: 7 },
               ])
             }} style={{ ...btnSoft, alignSelf: 'center', fontSize: 12 }}>
@@ -861,21 +951,32 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview }) {
                 padding: '12px 14px', background: theme.colors.bg,
                 border: `1px solid ${theme.colors.border}`, borderRadius: 8,
               }}>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: theme.colors.text, marginBottom: clause.content || (clause.items && clause.items.length > 0) ? 6 : 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: theme.colors.text, marginBottom: clause.content || (clause.topics && clause.topics.length > 0) ? 6 : 0 }}>
                   <span className="mono" style={{ color: theme.colors.primary, marginRight: 6 }}>{idx + 1}&#170;</span>
                   {clause.title}
                 </div>
                 {clause.content && (
-                  <div style={{ fontSize: 12, color: theme.colors.textSecondary, lineHeight: 1.5, marginBottom: clause.items?.length > 0 ? 6 : 0 }}>
+                  <div style={{ fontSize: 12, color: theme.colors.textSecondary, lineHeight: 1.5, marginBottom: clause.topics?.length > 0 ? 6 : 0 }}>
                     {clause.content}
                   </div>
                 )}
-                {clause.items && clause.items.length > 0 && (
-                  <div style={{ paddingLeft: 16 }}>
-                    {clause.items.map((item, i) => (
-                      <div key={i} style={{ fontSize: 11.5, color: theme.colors.textSecondary, lineHeight: 1.5, marginBottom: 2 }}>
-                        <span className="mono" style={{ color: theme.colors.gold, marginRight: 6 }}>{idx + 1}.{i + 1}</span>
-                        {item}
+                {clause.topics && clause.topics.length > 0 && (
+                  <div style={{ paddingLeft: 12 }}>
+                    {clause.topics.map((topic, i) => (
+                      <div key={i} style={{ marginBottom: 4 }}>
+                        <div style={{ fontSize: 11.5, color: theme.colors.textSecondary, lineHeight: 1.5 }}>
+                          <span className="mono" style={{ color: theme.colors.gold, marginRight: 6, fontWeight: 600 }}>{idx + 1}.{i + 1}</span>
+                          {topic.text}
+                        </div>
+                        {topic.subtopics && topic.subtopics.length > 0 && (
+                          <div style={{ paddingLeft: 28, marginTop: 2 }}>
+                            {topic.subtopics.map((sub, si) => (
+                              <div key={si} style={{ fontSize: 11, color: theme.colors.textMuted, lineHeight: 1.5 }}>
+                                <span style={{ marginRight: 4 }}>*</span>{sub}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -991,12 +1092,23 @@ function ContractDocPreview({ contract, onClose }) {
                 {clause.content}
               </p>
             )}
-            {clause.items && clause.items.length > 0 && (
-              <div style={{ paddingLeft: 0 }}>
-                {clause.items.map((item, i) => (
-                  <p key={i} style={{ marginBottom: 6, textAlign: 'justify' }}>
-                    <strong>{idx + 1}.{i + 1}</strong> &ndash; {item}
-                  </p>
+            {clause.topics && clause.topics.length > 0 && (
+              <div>
+                {clause.topics.map((topic, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <p style={{ marginBottom: topic.subtopics?.length > 0 ? 4 : 0, textAlign: 'justify' }}>
+                      <strong>{idx + 1}.{i + 1}</strong> &ndash; {topic.text}
+                    </p>
+                    {topic.subtopics && topic.subtopics.length > 0 && (
+                      <div style={{ paddingLeft: 24 }}>
+                        {topic.subtopics.map((sub, si) => (
+                          <p key={si} style={{ marginBottom: 3, textAlign: 'justify' }}>
+                            * {sub}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
