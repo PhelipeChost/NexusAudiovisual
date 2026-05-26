@@ -50,6 +50,17 @@ export default function ContractSign() {
   const [submitting, setSubmitting] = useState(false)
   const [signedAt, setSignedAt] = useState(null)
   const [fontsLoaded, setFontsLoaded] = useState(false)
+  const [govbrAvailable, setGovbrAvailable] = useState(false)
+  const [signMethod, setSignMethod] = useState('typed') // typed or govbr
+
+  // Check Gov.br availability
+  useEffect(() => {
+    if (token) {
+      api.contracts.govbrAvailable(token).then(data => {
+        if (data.available) setGovbrAvailable(true)
+      }).catch(() => {})
+    }
+  }, [token])
 
   // Load Google Fonts
   useEffect(() => {
@@ -325,102 +336,199 @@ export default function ContractSign() {
               Assinar Contrato
             </h2>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {/* Signer name */}
-              <div>
-                <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>Nome completo</label>
-                <input
-                  value={signerName}
-                  onChange={e => setSignerName(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: `1px solid ${theme.colors.border}`, background: theme.colors.bg, color: theme.colors.text, fontSize: 14 }}
-                  placeholder="Seu nome completo"
-                />
-              </div>
-
-              {/* CPF */}
-              <div>
-                <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>CPF</label>
-                <input
-                  value={signerCPF}
-                  onChange={e => { setSignerCPF(maskCPF(e.target.value)); setCpfError('') }}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: `1px solid ${cpfError ? theme.colors.danger : theme.colors.border}`, background: theme.colors.bg, color: theme.colors.text, fontSize: 14 }}
-                  placeholder="000.000.000-00"
-                  maxLength={14}
-                />
-                {cpfError && <div style={{ fontSize: 11, color: theme.colors.danger, marginTop: 4 }}>{cpfError}</div>}
-              </div>
-
-              {/* Typed signature preview */}
-              <div>
-                <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>
-                  Sua assinatura digital
+            {/* Method selector — only show if Gov.br is available */}
+            {govbrAvailable && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 8, fontWeight: 500 }}>
+                  Metodo de assinatura
                 </label>
-
-                {/* Font selector */}
-                <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                  {CURSIVE_FONTS.map(f => (
-                    <button
-                      key={f.name}
-                      onClick={() => setSelectedFont(f.name)}
-                      style={{
-                        padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
-                        border: `1px solid ${selectedFont === f.name ? theme.colors.primary + '66' : theme.colors.border}`,
-                        background: selectedFont === f.name ? theme.colors.primaryMuted : 'transparent',
-                        color: selectedFont === f.name ? theme.colors.primary : theme.colors.textMuted,
-                        fontWeight: 500,
-                      }}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Signature preview box */}
-                <div style={{
-                  background: '#fff', borderRadius: 8, padding: '20px 24px',
-                  border: `1px solid ${theme.colors.border}`,
-                  minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  position: 'relative',
-                }}>
-                  {signerName.trim() ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setSignMethod('govbr')}
+                    style={{
+                      flex: 1, padding: '14px 16px', borderRadius: 10, cursor: 'pointer',
+                      border: `2px solid ${signMethod === 'govbr' ? '#1351B4' : theme.colors.border}`,
+                      background: signMethod === 'govbr' ? 'rgba(19, 81, 180, 0.08)' : 'transparent',
+                      display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.15s',
+                    }}
+                  >
                     <div style={{
-                      fontFamily: `'${selectedFont}', cursive`,
-                      fontSize: 36, color: '#111', lineHeight: 1.2,
-                      userSelect: 'none', textAlign: 'center',
-                    }}>
-                      {signerName}
+                      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                      background: 'linear-gradient(135deg, #1351B4, #0C326F)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 14, fontWeight: 800, color: '#fff',
+                    }}>G</div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: signMethod === 'govbr' ? '#1351B4' : theme.colors.text }}>Gov.br</div>
+                      <div style={{ fontSize: 10.5, color: theme.colors.textMuted }}>Assinatura com conta Gov.br</div>
                     </div>
-                  ) : (
-                    <div style={{ color: '#bbb', fontSize: 14, fontStyle: 'italic' }}>
-                      Digite seu nome acima para visualizar
+                  </button>
+                  <button
+                    onClick={() => setSignMethod('typed')}
+                    style={{
+                      flex: 1, padding: '14px 16px', borderRadius: 10, cursor: 'pointer',
+                      border: `2px solid ${signMethod === 'typed' ? theme.colors.primary : theme.colors.border}`,
+                      background: signMethod === 'typed' ? theme.colors.primaryMuted : 'transparent',
+                      display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.15s',
+                    }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                      background: theme.colors.primary,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 16, color: '#fff',
+                    }}>✍</div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: signMethod === 'typed' ? theme.colors.primary : theme.colors.text }}>Assinatura digital</div>
+                      <div style={{ fontSize: 10.5, color: theme.colors.textMuted }}>Nome + verificacao por email</div>
                     </div>
-                  )}
-                  {/* Signature line */}
-                  <div style={{
-                    position: 'absolute', bottom: 16, left: 24, right: 24,
-                    height: 1, background: '#ddd',
-                  }} />
+                  </button>
                 </div>
               </div>
+            )}
 
-              {/* Submit */}
-              <button
-                onClick={handleSendOTP}
-                disabled={submitting || !signerName.trim() || !signerCPF}
-                style={{
-                  width: '100%', padding: '14px', borderRadius: 8, border: 'none',
-                  background: theme.colors.primary, color: '#fff', fontWeight: 600,
-                  fontSize: 14, cursor: 'pointer', marginTop: 8,
-                  opacity: (submitting || !signerName.trim() || !signerCPF) ? 0.5 : 1,
-                }}
-              >
-                {submitting ? 'Enviando...' : 'Enviar codigo de verificacao'}
-              </button>
+            {/* Gov.br signing */}
+            {signMethod === 'govbr' && govbrAvailable && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
+                <div style={{
+                  width: 80, height: 80, borderRadius: '50%', margin: '8px auto',
+                  background: 'linear-gradient(135deg, #1351B4, #0C326F)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 4px 20px rgba(19, 81, 180, 0.3)',
+                }}>
+                  <span style={{ fontSize: 32, color: '#fff', fontWeight: 800 }}>G</span>
+                </div>
 
-              <p style={{ fontSize: 11.5, color: theme.colors.textMuted, textAlign: 'center', lineHeight: 1.5 }}>
-                Ao assinar, voce concorda com os termos deste contrato. Um codigo de 6 digitos sera enviado ao seu email para confirmar a assinatura.
-              </p>
-            </div>
+                <p style={{ fontSize: 13, color: theme.colors.textSecondary, textAlign: 'center', lineHeight: 1.6, maxWidth: 420 }}>
+                  Voce sera redirecionado para o login do <strong style={{ color: theme.colors.text }}>Gov.br</strong> (Governo Federal).
+                  Apos autenticar, o contrato sera assinado automaticamente com seus dados do Gov.br.
+                </p>
+
+                <div style={{
+                  padding: '12px 16px', borderRadius: 8, width: '100%', maxWidth: 420,
+                  background: 'rgba(19, 81, 180, 0.06)', border: '1px solid rgba(19, 81, 180, 0.15)',
+                }}>
+                  <div style={{ fontSize: 11, color: '#1351B4', fontWeight: 600, marginBottom: 4 }}>Niveis de confiabilidade</div>
+                  <div style={{ fontSize: 11, color: theme.colors.textMuted, lineHeight: 1.5 }}>
+                    <span style={{ color: '#CD7F32' }}>● Bronze</span> — Conta basica&emsp;
+                    <span style={{ color: '#888' }}>● Prata</span> — Identidade verificada&emsp;
+                    <span style={{ color: '#FFD700' }}>● Ouro</span> — Biometria facial
+                  </div>
+                </div>
+
+                <a
+                  href={`${window.location.origin}/audiovisual/api/govbr/authorize/${token}`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 10, width: '100%', maxWidth: 420,
+                    padding: '16px 24px', borderRadius: 10, border: 'none', textDecoration: 'none',
+                    background: 'linear-gradient(135deg, #1351B4, #0C326F)',
+                    color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer',
+                    justifyContent: 'center', boxShadow: '0 2px 12px rgba(19, 81, 180, 0.3)',
+                    transition: 'transform 0.1s',
+                  }}
+                  onMouseOver={e => e.currentTarget.style.transform = 'scale(1.02)'}
+                  onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                  Entrar com Gov.br e assinar
+                </a>
+
+                <p style={{ fontSize: 10.5, color: theme.colors.textFaint, textAlign: 'center', lineHeight: 1.5, maxWidth: 400 }}>
+                  Assinatura com validade juridica conforme MP 2.200-2/2001. Seus dados sao obtidos diretamente do Gov.br.
+                </p>
+              </div>
+            )}
+
+            {/* Typed signature (default or when govbr not available) */}
+            {signMethod === 'typed' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {/* Signer name */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>Nome completo</label>
+                  <input
+                    value={signerName}
+                    onChange={e => setSignerName(e.target.value)}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: `1px solid ${theme.colors.border}`, background: theme.colors.bg, color: theme.colors.text, fontSize: 14 }}
+                    placeholder="Seu nome completo"
+                  />
+                </div>
+
+                {/* CPF */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>CPF</label>
+                  <input
+                    value={signerCPF}
+                    onChange={e => { setSignerCPF(maskCPF(e.target.value)); setCpfError('') }}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: `1px solid ${cpfError ? theme.colors.danger : theme.colors.border}`, background: theme.colors.bg, color: theme.colors.text, fontSize: 14 }}
+                    placeholder="000.000.000-00"
+                    maxLength={14}
+                  />
+                  {cpfError && <div style={{ fontSize: 11, color: theme.colors.danger, marginTop: 4 }}>{cpfError}</div>}
+                </div>
+
+                {/* Typed signature preview */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>
+                    Sua assinatura digital
+                  </label>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    {CURSIVE_FONTS.map(f => (
+                      <button
+                        key={f.name}
+                        onClick={() => setSelectedFont(f.name)}
+                        style={{
+                          padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                          border: `1px solid ${selectedFont === f.name ? theme.colors.primary + '66' : theme.colors.border}`,
+                          background: selectedFont === f.name ? theme.colors.primaryMuted : 'transparent',
+                          color: selectedFont === f.name ? theme.colors.primary : theme.colors.textMuted,
+                          fontWeight: 500,
+                        }}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{
+                    background: '#fff', borderRadius: 8, padding: '20px 24px',
+                    border: `1px solid ${theme.colors.border}`,
+                    minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    position: 'relative',
+                  }}>
+                    {signerName.trim() ? (
+                      <div style={{
+                        fontFamily: `'${selectedFont}', cursive`,
+                        fontSize: 36, color: '#111', lineHeight: 1.2,
+                        userSelect: 'none', textAlign: 'center',
+                      }}>
+                        {signerName}
+                      </div>
+                    ) : (
+                      <div style={{ color: '#bbb', fontSize: 14, fontStyle: 'italic' }}>
+                        Digite seu nome acima para visualizar
+                      </div>
+                    )}
+                    <div style={{ position: 'absolute', bottom: 16, left: 24, right: 24, height: 1, background: '#ddd' }} />
+                  </div>
+                </div>
+
+                {/* Submit */}
+                <button
+                  onClick={handleSendOTP}
+                  disabled={submitting || !signerName.trim() || !signerCPF}
+                  style={{
+                    width: '100%', padding: '14px', borderRadius: 8, border: 'none',
+                    background: theme.colors.primary, color: '#fff', fontWeight: 600,
+                    fontSize: 14, cursor: 'pointer', marginTop: 8,
+                    opacity: (submitting || !signerName.trim() || !signerCPF) ? 0.5 : 1,
+                  }}
+                >
+                  {submitting ? 'Enviando...' : 'Enviar codigo de verificacao'}
+                </button>
+
+                <p style={{ fontSize: 11.5, color: theme.colors.textMuted, textAlign: 'center', lineHeight: 1.5 }}>
+                  Ao assinar, voce concorda com os termos deste contrato. Um codigo de 6 digitos sera enviado ao seu email para confirmar a assinatura.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

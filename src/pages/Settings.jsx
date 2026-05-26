@@ -11,7 +11,7 @@ import {
 
 const ALL_TABS = [
   { id: 'workspace', label: 'Workspace', roles: ['gestor'] },
-  { id: 'email', label: 'Email (SMTP)', roles: ['gestor'] },
+  { id: 'integrations', label: 'Integracoes', roles: ['gestor'] },
   { id: 'subscription', label: 'Plano & Pagamento', roles: ['gestor'] },
   { id: 'columns', label: 'Etapas do kanban', roles: ['gestor'] },
   { id: 'account', label: 'Sua conta', roles: ['gestor', 'editor', 'cliente'] },
@@ -45,7 +45,7 @@ export default function Settings() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
         {tab === 'workspace' && <WorkspaceSettings />}
-        {tab === 'email' && <EmailSettings />}
+        {tab === 'integrations' && <IntegrationsSettings />}
         {tab === 'subscription' && <SubscriptionSettings />}
         {tab === 'columns' && <ColumnsSettings />}
         {tab === 'account' && <AccountSettings />}
@@ -161,8 +161,9 @@ function WorkspaceSettings() {
   )
 }
 
-function EmailSettings() {
+function IntegrationsSettings() {
   const [smtp, setSmtp] = useState({ smtp_host: '', smtp_port: '587', smtp_user: '', smtp_pass: '', smtp_from: '' })
+  const [govbr, setGovbr] = useState({ govbr_client_id: '', govbr_client_secret: '', govbr_env: 'staging' })
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [msg, setMsg] = useState(null) // { type: 'success'|'error', text }
@@ -177,6 +178,11 @@ function EmailSettings() {
         smtp_pass: data?.smtp_pass || '',
         smtp_from: data?.smtp_from || '',
       })
+      setGovbr({
+        govbr_client_id: data?.govbr_client_id || '',
+        govbr_client_secret: data?.govbr_client_secret || '',
+        govbr_env: data?.govbr_env || 'staging',
+      })
       setLoaded(true)
     }).catch(console.error)
   }, [])
@@ -185,7 +191,7 @@ function EmailSettings() {
     setSaving(true)
     setMsg(null)
     try {
-      const result = await api.settings.update(smtp)
+      const result = await api.settings.update({ ...smtp, ...govbr })
       setSmtp({
         smtp_host: result?.smtp_host || '',
         smtp_port: String(result?.smtp_port || '587'),
@@ -193,7 +199,12 @@ function EmailSettings() {
         smtp_pass: result?.smtp_pass || '',
         smtp_from: result?.smtp_from || '',
       })
-      setMsg({ type: 'success', text: 'Configuracoes SMTP salvas com sucesso!' })
+      setGovbr({
+        govbr_client_id: result?.govbr_client_id || '',
+        govbr_client_secret: result?.govbr_client_secret || '',
+        govbr_env: result?.govbr_env || 'staging',
+      })
+      setMsg({ type: 'success', text: 'Configuracoes salvas com sucesso!' })
     } catch (err) {
       setMsg({ type: 'error', text: err.message })
     } finally { setSaving(false) }
@@ -222,9 +233,9 @@ function EmailSettings() {
   return (
     <>
       <div>
-        <h2 className="display" style={{ fontSize: 26, color: theme.colors.text, margin: 0 }}>Email (SMTP)</h2>
+        <h2 className="display" style={{ fontSize: 26, color: theme.colors.text, margin: 0 }}>Integracoes</h2>
         <p style={{ fontSize: 13, color: theme.colors.textMuted, marginTop: 4 }}>
-          Configure o envio de emails para assinaturas digitais e notificacoes.
+          Configure o envio de emails e a integracao com Gov.br para assinaturas digitais.
         </p>
       </div>
 
@@ -320,6 +331,86 @@ function EmailSettings() {
           </div>
         </div>
       )}
+
+      {/* ═══ Gov.br Section ═══ */}
+      <div style={{ borderTop: `1px solid ${theme.colors.border}`, paddingTop: 24, marginTop: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: 'linear-gradient(135deg, #1351B4, #0C326F)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, fontWeight: 800, color: '#fff', flexShrink: 0,
+          }}>G</div>
+          <h2 className="display" style={{ fontSize: 20, color: theme.colors.text, margin: 0 }}>Gov.br (Assinatura Digital)</h2>
+        </div>
+        <p style={{ fontSize: 13, color: theme.colors.textMuted, marginTop: 4, marginBottom: 16 }}>
+          Integre com o Gov.br para permitir assinatura com conta do Governo Federal.
+        </p>
+      </div>
+
+      <Section title="Credenciais Gov.br">
+        <Row label="Client ID" hint="Obtido no portal de servicos Gov.br">
+          <input
+            value={govbr.govbr_client_id}
+            onChange={e => setGovbr(prev => ({ ...prev, govbr_client_id: e.target.value }))}
+            placeholder="Seu client_id do Gov.br"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </Row>
+        <Row label="Client Secret" hint="Chave secreta da aplicacao">
+          <input
+            type="password"
+            value={govbr.govbr_client_secret}
+            onChange={e => setGovbr(prev => ({ ...prev, govbr_client_secret: e.target.value }))}
+            placeholder="••••••••"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </Row>
+        <Row label="Ambiente" hint="Use Staging para testes">
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => setGovbr(prev => ({ ...prev, govbr_env: 'staging' }))}
+              style={{
+                ...btnSoft, padding: '6px 14px', fontSize: 12,
+                background: govbr.govbr_env === 'staging' ? 'rgba(255,183,77,0.12)' : 'transparent',
+                borderColor: govbr.govbr_env === 'staging' ? 'rgba(255,183,77,0.4)' : theme.colors.border,
+                color: govbr.govbr_env === 'staging' ? '#FFB74D' : theme.colors.textMuted,
+              }}
+            >
+              Staging (testes)
+            </button>
+            <button
+              onClick={() => setGovbr(prev => ({ ...prev, govbr_env: 'production' }))}
+              style={{
+                ...btnSoft, padding: '6px 14px', fontSize: 12,
+                background: govbr.govbr_env === 'production' ? 'rgba(0,210,150,0.12)' : 'transparent',
+                borderColor: govbr.govbr_env === 'production' ? 'rgba(0,210,150,0.3)' : theme.colors.border,
+                color: govbr.govbr_env === 'production' ? theme.colors.mint : theme.colors.textMuted,
+              }}
+            >
+              Producao
+            </button>
+          </div>
+        </Row>
+      </Section>
+
+      {/* Gov.br setup instructions */}
+      <div style={{
+        ...panelStyle, padding: 16,
+        background: 'rgba(19, 81, 180, 0.04)',
+        border: '1px solid rgba(19, 81, 180, 0.15)',
+      }}>
+        <div style={{ fontSize: 12, color: '#1351B4', fontWeight: 600, marginBottom: 6 }}>
+          Como configurar o Gov.br
+        </div>
+        <ol style={{ fontSize: 12, color: theme.colors.textMuted, lineHeight: 1.8, margin: 0, paddingLeft: 18 }}>
+          <li>Acesse o <strong>Portal de Servicos do Gov.br</strong> (servicos.gov.br)</li>
+          <li>Cadastre sua aplicacao na <strong>Plataforma de Cidadania Digital</strong></li>
+          <li>Solicite acesso aos escopos: <code style={{ fontSize: 10, background: theme.colors.bgSecondary, padding: '2px 4px', borderRadius: 3 }}>openid profile email govbr_confiabilidades</code></li>
+          <li>Configure a <strong>Redirect URI</strong>: <code style={{ fontSize: 10, background: theme.colors.bgSecondary, padding: '2px 4px', borderRadius: 3, wordBreak: 'break-all' }}>{window.location.origin}/audiovisual/api/govbr/callback</code></li>
+          <li>Copie o <strong>Client ID</strong> e <strong>Client Secret</strong> para os campos acima</li>
+        </ol>
+      </div>
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button onClick={handleTest} disabled={testing || !smtp.smtp_user} style={{

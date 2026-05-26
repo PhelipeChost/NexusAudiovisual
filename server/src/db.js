@@ -546,6 +546,31 @@ async function initDb() {
   try { db.run("ALTER TABLE companies ADD COLUMN smtp_pass TEXT") } catch {}
   try { db.run("ALTER TABLE companies ADD COLUMN smtp_from TEXT") } catch {}
 
+  // Gov.br integration per company
+  try { db.run("ALTER TABLE companies ADD COLUMN govbr_client_id TEXT") } catch {}
+  try { db.run("ALTER TABLE companies ADD COLUMN govbr_client_secret TEXT") } catch {}
+  try { db.run("ALTER TABLE companies ADD COLUMN govbr_env TEXT DEFAULT 'staging'") } catch {} // staging or production
+
+  // Gov.br signature data on contract_signatures
+  try { db.run("ALTER TABLE contract_signatures ADD COLUMN signature_method TEXT DEFAULT 'typed'") } catch {} // typed or govbr
+  try { db.run("ALTER TABLE contract_signatures ADD COLUMN govbr_cpf TEXT") } catch {}
+  try { db.run("ALTER TABLE contract_signatures ADD COLUMN govbr_name TEXT") } catch {}
+  try { db.run("ALTER TABLE contract_signatures ADD COLUMN govbr_nivel TEXT") } catch {} // bronze, prata, ouro
+  try { db.run("ALTER TABLE contract_signatures ADD COLUMN pkcs7_signature TEXT") } catch {}
+
+  // Gov.br OAuth state tracking
+  db.run(`CREATE TABLE IF NOT EXISTS govbr_oauth_states (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    state TEXT UNIQUE NOT NULL,
+    company_id INTEGER NOT NULL,
+    contract_id INTEGER,
+    sign_token TEXT,
+    signer_type TEXT DEFAULT 'public',
+    user_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME
+  )`)
+
   // Seed default plan if none exists
   const planCount = db.exec("SELECT COUNT(*) FROM plans")[0]?.values[0][0] || 0
   if (planCount === 0) {

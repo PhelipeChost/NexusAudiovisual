@@ -1660,9 +1660,12 @@ router.put('/notifications/read-all', authMiddleware, (req, res) => {
 
 router.get('/settings', authMiddleware, (req, res) => {
   const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
-  // Mask smtp_pass in response
+  // Mask secrets in response
   if (company?.smtp_pass) {
     company.smtp_pass = '*'.repeat(Math.max(0, company.smtp_pass.length - 4)) + company.smtp_pass.slice(-4)
+  }
+  if (company?.govbr_client_secret) {
+    company.govbr_client_secret = '*'.repeat(Math.max(0, company.govbr_client_secret.length - 4)) + company.govbr_client_secret.slice(-4)
   }
   res.json(company)
 })
@@ -1693,10 +1696,23 @@ router.put('/settings', authMiddleware, requireRole('gestor'), (req, res) => {
   }
   if (smtp_from !== undefined) run('UPDATE companies SET smtp_from = ? WHERE id = ?', [smtp_from || null, req.user.company_id])
 
+  // Gov.br settings
+  const { govbr_client_id, govbr_client_secret, govbr_env } = req.body
+  if (govbr_client_id !== undefined) run('UPDATE companies SET govbr_client_id = ? WHERE id = ?', [govbr_client_id || null, req.user.company_id])
+  if (govbr_client_secret !== undefined) {
+    if (govbr_client_secret && !/^\*+/.test(govbr_client_secret)) {
+      run('UPDATE companies SET govbr_client_secret = ? WHERE id = ?', [govbr_client_secret, req.user.company_id])
+    }
+  }
+  if (govbr_env !== undefined) run('UPDATE companies SET govbr_env = ? WHERE id = ?', [govbr_env === 'production' ? 'production' : 'staging', req.user.company_id])
+
   const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
-  // Mask smtp_pass in response
+  // Mask secrets in response
   if (company?.smtp_pass) {
     company.smtp_pass = '*'.repeat(Math.max(0, company.smtp_pass.length - 4)) + company.smtp_pass.slice(-4)
+  }
+  if (company?.govbr_client_secret) {
+    company.govbr_client_secret = '*'.repeat(Math.max(0, company.govbr_client_secret.length - 4)) + company.govbr_client_secret.slice(-4)
   }
   res.json(company)
 })
@@ -2462,6 +2478,283 @@ router.get('/contracts/:id/signatures', authMiddleware, requireRole('gestor'), (
   const signatures = all('SELECT * FROM contract_signatures WHERE contract_id = ? ORDER BY signed_at DESC', [id])
   res.json(signatures)
 })
+
+// ============ GOV.BR DIGITAL SIGNATURE INTEGRATION ============
+
+const GOVBR_URLS = {
+  staging: {
+    auth: 'https://sso.staging.acesso.gov.br/authorize',
+    token: 'https://sso.staging.acesso.gov.br/token',
+    userinfo: 'https://sso.staging.acesso.gov.br/userinfo',
+    sign: 'https://assinatura-api.staging.iti.br/externo/v2/assinarPKCS7',
+  },
+  production: {
+    auth: 'https://sso.acesso.gov.br/authorize',
+    token: 'https://sso.acesso.gov.br/token',
+    userinfo: 'https://sso.acesso.gov.br/userinfo',
+    sign: 'https://assinador.iti.br/externo/v2/assinarPKCS7',
+  },
+}
+
+function getGovBRConfig(companyId) {
+  const company = get('SELECT govbr_client_id, govbr_client_secret, govbr_env FROM companies WHERE id = ?', [companyId])
+  if (!company?.govbr_client_id || !company?.govbr_client_secret) {
+    return null
+  }
+  const env = company.govbr_env === 'production' ? 'production' : 'staging'
+  return {
+    clientId: company.govbr_client_id,
+    clientSecret: company.govbr_client_secret,
+    urls: GOVBR_URLS[env],
+    env,
+  }
+}
+
+// Check if Gov.br is configured for a contract (PUBLIC — used by signing page)
+router.get('/contracts/sign/:token/govbr-available', (req, res) => {
+  const contract = get('SELECT company_id, signature_status FROM contracts WHERE sign_token = ?', [req.params.token])
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+  const config = getGovBRConfig(contract.company_id)
+  res.json({ available: !!config, signed: contract.signature_status === 'signed' })
+})
+
+// Check if Gov.br is configured (authenticated — client portal)
+router.get('/client/contract/govbr-available', authMiddleware, requireRole('cliente'), (req, res) => {
+  const config = getGovBRConfig(req.user.company_id)
+  res.json({ available: !!config })
+})
+
+// Start Gov.br OAuth flow (PUBLIC — for external signing link)
+router.get('/govbr/authorize/:signToken', (req, res) => {
+  const signToken = req.params.signToken
+  const contract = get('SELECT id, company_id, signature_status FROM contracts WHERE sign_token = ?', [signToken])
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+  if (contract.signature_status === 'signed') return res.status(400).json({ error: 'Contrato ja assinado' })
+
+  const config = getGovBRConfig(contract.company_id)
+  if (!config) return res.status(400).json({ error: 'Gov.br nao configurado para esta empresa' })
+
+  // Generate unique state for CSRF protection
+  const state = crypto.randomBytes(24).toString('hex')
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString() // 15 min
+
+  run(`INSERT INTO govbr_oauth_states (state, company_id, contract_id, sign_token, signer_type, expires_at)
+       VALUES (?, ?, ?, ?, 'public', ?)`,
+    [state, contract.company_id, contract.id, signToken, expiresAt])
+
+  const appUrl = process.env.APP_URL || 'https://reinonexus.com/audiovisual'
+  const redirectUri = `${appUrl.replace(/\/$/, '')}/api/govbr/callback`
+
+  const authUrl = `${config.urls.auth}?` + new URLSearchParams({
+    response_type: 'code',
+    client_id: config.clientId,
+    scope: 'openid email profile govbr_confiabilidades',
+    redirect_uri: redirectUri,
+    nonce: crypto.randomBytes(16).toString('hex'),
+    state,
+  }).toString()
+
+  res.redirect(authUrl)
+})
+
+// Start Gov.br OAuth flow (authenticated — client portal)
+router.get('/govbr/authorize-client', authMiddleware, requireRole('cliente'), (req, res) => {
+  const config = getGovBRConfig(req.user.company_id)
+  if (!config) return res.status(400).json({ error: 'Gov.br nao configurado' })
+
+  // Find the client's contract
+  const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente nao encontrado' })
+
+  const contract = get(`SELECT c.id, c.signature_status, c.sign_token FROM contracts c
+    WHERE c.company_id = ? AND c.client_id = ? AND c.signature_status != 'signed'
+    ORDER BY c.id DESC LIMIT 1`, [req.user.company_id, client.id])
+  if (!contract) return res.status(404).json({ error: 'Nenhum contrato pendente' })
+
+  const state = crypto.randomBytes(24).toString('hex')
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+
+  run(`INSERT INTO govbr_oauth_states (state, company_id, contract_id, sign_token, signer_type, user_id, expires_at)
+       VALUES (?, ?, ?, ?, 'client', ?, ?)`,
+    [state, req.user.company_id, contract.id, contract.sign_token, req.user.id, expiresAt])
+
+  const appUrl = process.env.APP_URL || 'https://reinonexus.com/audiovisual'
+  const redirectUri = `${appUrl.replace(/\/$/, '')}/api/govbr/callback`
+
+  const authUrl = `${config.urls.auth}?` + new URLSearchParams({
+    response_type: 'code',
+    client_id: config.clientId,
+    scope: 'openid email profile govbr_confiabilidades',
+    redirect_uri: redirectUri,
+    nonce: crypto.randomBytes(16).toString('hex'),
+    state,
+  }).toString()
+
+  res.redirect(authUrl)
+})
+
+// Gov.br OAuth callback — handles token exchange, user info, and signature
+router.get('/govbr/callback', async (req, res) => {
+  const { code, state, error: oauthError } = req.query
+  const appUrl = process.env.APP_URL || 'https://reinonexus.com/audiovisual'
+
+  if (oauthError || !code || !state) {
+    return res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent(oauthError || 'Autenticacao cancelada')}`)
+  }
+
+  // Validate state
+  const oauthState = get('SELECT * FROM govbr_oauth_states WHERE state = ?', [state])
+  if (!oauthState) {
+    return res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent('Sessao invalida ou expirada')}`)
+  }
+
+  // Check expiry
+  if (new Date(oauthState.expires_at) < new Date()) {
+    run('DELETE FROM govbr_oauth_states WHERE id = ?', [oauthState.id])
+    return res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent('Sessao expirada. Tente novamente.')}`)
+  }
+
+  // Clean up used state
+  run('DELETE FROM govbr_oauth_states WHERE id = ?', [oauthState.id])
+
+  const config = getGovBRConfig(oauthState.company_id)
+  if (!config) {
+    return res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent('Gov.br nao configurado')}`)
+  }
+
+  const redirectUri = `${appUrl.replace(/\/$/, '')}/api/govbr/callback`
+
+  try {
+    // 1. Exchange code for access token
+    const tokenRes = await fetch(config.urls.token, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': 'Basic ' + Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64'),
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+      }).toString(),
+    })
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text()
+      console.error('Gov.br token error:', errText)
+      return res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent('Erro ao autenticar com Gov.br')}`)
+    }
+
+    const tokenData = await tokenRes.json()
+    const accessToken = tokenData.access_token
+
+    // 2. Get user info (CPF, name, trust level)
+    const userInfoRes = await fetch(config.urls.userinfo, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    })
+    const userInfo = await userInfoRes.json()
+
+    const cpf = userInfo.sub // CPF is the 'sub' claim in Gov.br
+    const name = userInfo.name || userInfo.given_name || ''
+    const email = userInfo.email || ''
+
+    // Determine trust level from confiabilidades
+    let nivel = 'bronze'
+    if (userInfo.govbr_confiabilidades) {
+      const confs = Array.isArray(userInfo.govbr_confiabilidades) ? userInfo.govbr_confiabilidades : []
+      if (confs.some(c => c.id === 'biovalid' || c.id === 'facial')) nivel = 'ouro'
+      else if (confs.some(c => c.id === 'balcao_sef' || c.id === 'balcao_denatran' || c.id === 'internet_banking')) nivel = 'prata'
+    }
+
+    // 3. Get contract and generate document hash
+    const contract = get('SELECT * FROM contracts WHERE id = ?', [oauthState.contract_id])
+    if (!contract) {
+      return res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent('Contrato nao encontrado')}`)
+    }
+    if (contract.signature_status === 'signed') {
+      return res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent('Contrato ja assinado')}`)
+    }
+
+    const clauses = all('SELECT title, content, items_json, position FROM contract_clauses WHERE contract_id = ? ORDER BY position', [oauthState.contract_id])
+    const docContent = JSON.stringify({ contract, clauses })
+    const docHash = crypto.createHash('sha256').update(docContent).digest('hex')
+    const hashBase64 = Buffer.from(docHash, 'hex').toString('base64')
+
+    // 4. Call Gov.br signature API (PKCS7)
+    let pkcs7Signature = null
+    try {
+      const signRes = await fetch(config.urls.sign, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ hashBase64 }),
+      })
+
+      if (signRes.ok) {
+        const signData = await signRes.json()
+        pkcs7Signature = signData.assinaturaBase64 || signData.signature || null
+      } else {
+        console.error('Gov.br sign API error:', await signRes.text())
+        // Continue even if PKCS7 fails — the OAuth authentication itself is already proof
+      }
+    } catch (signErr) {
+      console.error('Gov.br sign API error:', signErr)
+      // Continue — OAuth auth is still valid proof
+    }
+
+    // 5. Register the signature
+    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown'
+    const userAgent = req.headers['user-agent'] || 'unknown'
+
+    // Check if there's an existing pending signature record
+    const existingSig = get('SELECT id FROM contract_signatures WHERE contract_id = ? AND signed_at IS NULL ORDER BY id DESC LIMIT 1', [oauthState.contract_id])
+
+    if (existingSig) {
+      run(`UPDATE contract_signatures SET
+           signer_name = ?, signer_cpf = ?, signer_email = ?,
+           ip_address = ?, user_agent = ?, signed_at = CURRENT_TIMESTAMP,
+           document_hash = ?, signature_method = 'govbr',
+           govbr_cpf = ?, govbr_name = ?, govbr_nivel = ?,
+           pkcs7_signature = ?
+           WHERE id = ?`,
+        [name, cpf, email, ip, userAgent, docHash, cpf, name, nivel, pkcs7Signature, existingSig.id])
+    } else {
+      run(`INSERT INTO contract_signatures (contract_id, signer_role, signer_name, signer_cpf, signer_email,
+           ip_address, user_agent, signed_at, document_hash, signature_method,
+           govbr_cpf, govbr_name, govbr_nivel, pkcs7_signature)
+           VALUES (?, 'contratante', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'govbr', ?, ?, ?, ?)`,
+        [oauthState.contract_id, name, cpf, email, ip, userAgent, docHash, cpf, name, nivel, pkcs7Signature])
+    }
+
+    // Update contract status
+    run('UPDATE contracts SET signature_status = ?, document_hash = ? WHERE id = ?',
+      ['signed', docHash, oauthState.contract_id])
+
+    // Redirect to success page
+    const params = new URLSearchParams({
+      status: 'success',
+      name,
+      cpf: cpf ? cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4') : '',
+      nivel,
+      hash: docHash,
+      title: contract.title || '',
+      type: oauthState.signer_type,
+      signToken: oauthState.sign_token || '',
+    })
+    res.redirect(`${appUrl}/#/govbr/resultado?${params.toString()}`)
+
+  } catch (err) {
+    console.error('Gov.br callback error:', err)
+    res.redirect(`${appUrl}/#/govbr/resultado?status=error&msg=${encodeURIComponent('Erro interno ao processar assinatura')}`)
+  }
+})
+
+// Clean up expired OAuth states (runs on each request, lightweight)
+setInterval(() => {
+  try { run("DELETE FROM govbr_oauth_states WHERE expires_at < datetime('now')") } catch {}
+}, 5 * 60 * 1000)
 
 // ============ COMMENTS (accessible by editor and client too) ============
 

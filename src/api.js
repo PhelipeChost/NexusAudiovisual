@@ -76,6 +76,7 @@ const api = {
     getContract: () => request('/client/contract'),
     sendContractOTP: () => request('/client/contract/send-otp', { method: 'POST' }),
     signContract: (data) => request('/client/contract/sign', { method: 'POST', body: JSON.stringify(data) }),
+    govbrAvailable: () => request('/client/contract/govbr-available'),
   },
 
   editorPortal: {
@@ -100,6 +101,7 @@ const api = {
     verifySignature: (token, data) => fetch(`${BASE_URL}/contracts/sign/${token}/verify`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
     }).then(r => r.json()),
+    govbrAvailable: (token) => fetch(`${BASE_URL}/contracts/sign/${token}/govbr-available`).then(r => r.json()),
   },
 
   lookup: {

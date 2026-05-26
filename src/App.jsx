@@ -20,6 +20,7 @@ import EditorFinancial from './pages/EditorFinancial'
 import EditorMyReport from './pages/EditorMyReport'
 import Contracts from './pages/Contracts'
 import ContractSign from './pages/ContractSign'
+import GovBRResult from './pages/GovBRResult'
 import AdminDashboard from './pages/AdminDashboard'
 import LandingPage from './pages/LandingPage'
 
@@ -88,6 +89,7 @@ const AppRoutes = React.memo(function AppRoutes() {
       <Route path="/register" element={<Register />} />
       <Route path="/invite/:token" element={<Invite />} />
       <Route path="/assinar/:token" element={<ContractSign />} />
+      <Route path="/govbr/resultado" element={<GovBRResult />} />
 
       {/* Protected app routes */}
       <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
