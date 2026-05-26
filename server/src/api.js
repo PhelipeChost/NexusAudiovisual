@@ -1660,11 +1660,15 @@ router.put('/notifications/read-all', authMiddleware, (req, res) => {
 
 router.get('/settings', authMiddleware, (req, res) => {
   const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
+  // Mask smtp_pass in response
+  if (company?.smtp_pass) {
+    company.smtp_pass = '*'.repeat(Math.max(0, company.smtp_pass.length - 4)) + company.smtp_pass.slice(-4)
+  }
   res.json(company)
 })
 
 router.put('/settings', authMiddleware, requireRole('gestor'), (req, res) => {
-  const { name, logo, primary_color } = req.body
+  const { name, logo, primary_color, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from } = req.body
 
   // Handle logo separately: empty string means remove, undefined means don't change
   if (logo !== undefined) {
@@ -1677,8 +1681,37 @@ router.put('/settings', authMiddleware, requireRole('gestor'), (req, res) => {
     run('UPDATE companies SET primary_color = ? WHERE id = ?', [primary_color, req.user.company_id])
   }
 
+  // SMTP settings
+  if (smtp_host !== undefined) run('UPDATE companies SET smtp_host = ? WHERE id = ?', [smtp_host || null, req.user.company_id])
+  if (smtp_port !== undefined) run('UPDATE companies SET smtp_port = ? WHERE id = ?', [parseInt(smtp_port) || 587, req.user.company_id])
+  if (smtp_user !== undefined) run('UPDATE companies SET smtp_user = ? WHERE id = ?', [smtp_user || null, req.user.company_id])
+  if (smtp_pass !== undefined) {
+    // Don't overwrite with masked values
+    if (smtp_pass && !/^\*+/.test(smtp_pass)) {
+      run('UPDATE companies SET smtp_pass = ? WHERE id = ?', [smtp_pass, req.user.company_id])
+    }
+  }
+  if (smtp_from !== undefined) run('UPDATE companies SET smtp_from = ? WHERE id = ?', [smtp_from || null, req.user.company_id])
+
   const company = get('SELECT * FROM companies WHERE id = ?', [req.user.company_id])
+  // Mask smtp_pass in response
+  if (company?.smtp_pass) {
+    company.smtp_pass = '*'.repeat(Math.max(0, company.smtp_pass.length - 4)) + company.smtp_pass.slice(-4)
+  }
   res.json(company)
+})
+
+// Test email sending
+router.post('/settings/test-email', authMiddleware, requireRole('gestor'), async (req, res) => {
+  try {
+    const { sendTestEmail } = await import('./email.js')
+    const user = get('SELECT email FROM users WHERE id = ?', [req.user.id])
+    await sendTestEmail(user.email, req.user.company_id)
+    res.json({ success: true, sent_to: user.email })
+  } catch (err) {
+    console.error('Test email error:', err)
+    res.status(500).json({ error: err.message || 'Erro ao enviar email de teste' })
+  }
 })
 
 // ============ EDITOR DELIVER ============
@@ -2062,7 +2095,7 @@ router.post('/client/contract/send-otp', authMiddleware, requireRole('cliente'),
   // Send OTP
   try {
     const { sendOTPEmail } = await import('./email.js')
-    await sendOTPEmail(user.email, otp)
+    await sendOTPEmail(user.email, otp, req.user.company_id)
     res.json({ success: true, email_sent_to: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') })
   } catch (err) {
     console.error('OTP email error:', err)
@@ -2305,7 +2338,7 @@ router.post('/contracts/:id/send-signature', authMiddleware, requireRole('gestor
     const { sendSignatureEmail } = await import('./email.js')
     const baseUrl = process.env.APP_URL || 'https://reinonexus.com/audiovisual'
     const signUrl = `${baseUrl}/#/assinar/${signToken}`
-    await sendSignatureEmail(signer_email, signer_name || 'Cliente', contract.title, signUrl)
+    await sendSignatureEmail(signer_email, signer_name || 'Cliente', contract.title, signUrl, req.user.company_id)
   } catch (err) {
     console.error('Email error:', err)
     // Don't fail — signature link still works
@@ -2369,7 +2402,7 @@ router.post('/contracts/sign/:token/send-otp', async (req, res) => {
   // Send OTP via email
   try {
     const { sendOTPEmail } = await import('./email.js')
-    await sendOTPEmail(signature.signer_email, otp)
+    await sendOTPEmail(signature.signer_email, otp, contract.company_id)
     res.json({ success: true, email_sent_to: signature.signer_email.replace(/(.{2})(.*)(@.*)/, '$1***$3') })
   } catch (err) {
     console.error('OTP email error:', err)

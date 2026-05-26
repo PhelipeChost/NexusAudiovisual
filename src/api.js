@@ -214,6 +214,7 @@ const api = {
   settings: {
     get: () => request('/settings'),
     update: (data) => request('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+    testEmail: () => request('/settings/test-email', { method: 'POST' }),
   },
 
   activity: {

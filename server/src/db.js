@@ -539,6 +539,13 @@ async function initDb() {
   try { db.run("ALTER TABLE orders ADD COLUMN references_json TEXT DEFAULT '[]'") } catch {}
   try { db.run("ALTER TABLE orders ADD COLUMN delivery_link TEXT") } catch {}
 
+  // SMTP per company
+  try { db.run("ALTER TABLE companies ADD COLUMN smtp_host TEXT") } catch {}
+  try { db.run("ALTER TABLE companies ADD COLUMN smtp_port INTEGER DEFAULT 587") } catch {}
+  try { db.run("ALTER TABLE companies ADD COLUMN smtp_user TEXT") } catch {}
+  try { db.run("ALTER TABLE companies ADD COLUMN smtp_pass TEXT") } catch {}
+  try { db.run("ALTER TABLE companies ADD COLUMN smtp_from TEXT") } catch {}
+
   // Seed default plan if none exists
   const planCount = db.exec("SELECT COUNT(*) FROM plans")[0]?.values[0][0] || 0
   if (planCount === 0) {

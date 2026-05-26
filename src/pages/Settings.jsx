@@ -11,6 +11,7 @@ import {
 
 const ALL_TABS = [
   { id: 'workspace', label: 'Workspace', roles: ['gestor'] },
+  { id: 'email', label: 'Email (SMTP)', roles: ['gestor'] },
   { id: 'subscription', label: 'Plano & Pagamento', roles: ['gestor'] },
   { id: 'columns', label: 'Etapas do kanban', roles: ['gestor'] },
   { id: 'account', label: 'Sua conta', roles: ['gestor', 'editor', 'cliente'] },
@@ -44,6 +45,7 @@ export default function Settings() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
         {tab === 'workspace' && <WorkspaceSettings />}
+        {tab === 'email' && <EmailSettings />}
         {tab === 'subscription' && <SubscriptionSettings />}
         {tab === 'columns' && <ColumnsSettings />}
         {tab === 'account' && <AccountSettings />}
@@ -155,6 +157,184 @@ function WorkspaceSettings() {
           </div>
         </Row>
       </Section>
+    </>
+  )
+}
+
+function EmailSettings() {
+  const [smtp, setSmtp] = useState({ smtp_host: '', smtp_port: '587', smtp_user: '', smtp_pass: '', smtp_from: '' })
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [msg, setMsg] = useState(null) // { type: 'success'|'error', text }
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    api.settings.get().then(data => {
+      setSmtp({
+        smtp_host: data?.smtp_host || '',
+        smtp_port: String(data?.smtp_port || '587'),
+        smtp_user: data?.smtp_user || '',
+        smtp_pass: data?.smtp_pass || '',
+        smtp_from: data?.smtp_from || '',
+      })
+      setLoaded(true)
+    }).catch(console.error)
+  }, [])
+
+  async function handleSave() {
+    setSaving(true)
+    setMsg(null)
+    try {
+      const result = await api.settings.update(smtp)
+      setSmtp({
+        smtp_host: result?.smtp_host || '',
+        smtp_port: String(result?.smtp_port || '587'),
+        smtp_user: result?.smtp_user || '',
+        smtp_pass: result?.smtp_pass || '',
+        smtp_from: result?.smtp_from || '',
+      })
+      setMsg({ type: 'success', text: 'Configuracoes SMTP salvas com sucesso!' })
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message })
+    } finally { setSaving(false) }
+  }
+
+  async function handleTest() {
+    setTesting(true)
+    setMsg(null)
+    try {
+      const result = await api.settings.testEmail()
+      setMsg({ type: 'success', text: `Email de teste enviado para ${result.sent_to}` })
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message })
+    } finally { setTesting(false) }
+  }
+
+  if (!loaded) return <Spinner />
+
+  const presets = [
+    { label: 'Gmail', host: 'smtp.gmail.com', port: '587' },
+    { label: 'Outlook/Hotmail', host: 'smtp.office365.com', port: '587' },
+    { label: 'Zoho', host: 'smtp.zoho.com', port: '587' },
+    { label: 'SendGrid', host: 'smtp.sendgrid.net', port: '587' },
+  ]
+
+  return (
+    <>
+      <div>
+        <h2 className="display" style={{ fontSize: 26, color: theme.colors.text, margin: 0 }}>Email (SMTP)</h2>
+        <p style={{ fontSize: 13, color: theme.colors.textMuted, marginTop: 4 }}>
+          Configure o envio de emails para assinaturas digitais e notificacoes.
+        </p>
+      </div>
+
+      {msg && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 10,
+          background: msg.type === 'success' ? 'rgba(0,210,150,0.12)' : 'rgba(244,115,131,0.08)',
+          border: `1px solid ${msg.type === 'success' ? 'rgba(0,210,150,0.3)' : 'rgba(244,115,131,0.3)'}`,
+          color: msg.type === 'success' ? theme.colors.mint : theme.colors.danger,
+          fontSize: 13, fontWeight: 500,
+        }}>
+          {msg.text}
+        </div>
+      )}
+
+      {/* Quick presets */}
+      <div>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>Atalhos</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {presets.map(p => (
+            <button
+              key={p.label}
+              onClick={() => setSmtp(prev => ({ ...prev, smtp_host: p.host, smtp_port: p.port }))}
+              style={{
+                ...btnSoft, padding: '6px 12px', fontSize: 12,
+                background: smtp.smtp_host === p.host ? theme.colors.primaryMuted : 'transparent',
+                borderColor: smtp.smtp_host === p.host ? theme.colors.primary + '44' : theme.colors.border,
+                color: smtp.smtp_host === p.host ? theme.colors.primary : theme.colors.textSecondary,
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Section title="Servidor SMTP">
+        <Row label="Host" hint="Ex: smtp.gmail.com">
+          <input
+            value={smtp.smtp_host}
+            onChange={e => setSmtp(prev => ({ ...prev, smtp_host: e.target.value }))}
+            placeholder="smtp.gmail.com"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </Row>
+        <Row label="Porta" hint="587 (TLS) ou 465 (SSL)">
+          <input
+            value={smtp.smtp_port}
+            onChange={e => setSmtp(prev => ({ ...prev, smtp_port: e.target.value }))}
+            placeholder="587"
+            style={{ ...inputStyle, width: 120 }}
+          />
+        </Row>
+        <Row label="Usuario" hint="Email ou login SMTP">
+          <input
+            value={smtp.smtp_user}
+            onChange={e => setSmtp(prev => ({ ...prev, smtp_user: e.target.value }))}
+            placeholder="seu@email.com"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </Row>
+        <Row label="Senha" hint="Senha de app (nao a senha normal)">
+          <input
+            type="password"
+            value={smtp.smtp_pass}
+            onChange={e => setSmtp(prev => ({ ...prev, smtp_pass: e.target.value }))}
+            placeholder="••••••••"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </Row>
+        <Row label="Remetente" hint="Email que aparece como 'de' (opcional)">
+          <input
+            value={smtp.smtp_from}
+            onChange={e => setSmtp(prev => ({ ...prev, smtp_from: e.target.value }))}
+            placeholder="noreply@suaagencia.com (padrao: usuario)"
+            style={{ ...inputStyle, width: '100%' }}
+          />
+        </Row>
+      </Section>
+
+      {/* Gmail hint */}
+      {smtp.smtp_host === 'smtp.gmail.com' && (
+        <div style={{
+          ...panelStyle, padding: 16,
+          background: 'rgba(167,139,250,0.06)',
+          border: '1px solid rgba(167,139,250,0.2)',
+        }}>
+          <div style={{ fontSize: 12, color: theme.colors.primary, fontWeight: 600, marginBottom: 6 }}>
+            Dica para Gmail
+          </div>
+          <div style={{ fontSize: 12, color: theme.colors.textMuted, lineHeight: 1.6 }}>
+            Use uma <strong>Senha de App</strong> (nao a senha da conta). Acesse: Google {'>'} Seguranca {'>'} Verificacao em 2 etapas {'>'} Senhas de app. Crie uma senha para "Email" e use aqui.
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <button onClick={handleTest} disabled={testing || !smtp.smtp_user} style={{
+          ...btnSoft,
+          opacity: (!smtp.smtp_user || testing) ? 0.5 : 1,
+        }}>
+          {testing ? 'Enviando...' : 'Enviar email de teste'}
+        </button>
+        <button onClick={handleSave} disabled={saving} style={{
+          ...btnPrimary,
+          opacity: saving ? 0.6 : 1,
+        }}>
+          {saving ? 'Salvando...' : 'Salvar configuracoes'}
+        </button>
+      </div>
     </>
   )
 }
