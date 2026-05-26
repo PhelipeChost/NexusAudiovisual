@@ -1981,11 +1981,16 @@ router.get('/editor/financial', authMiddleware, requireRole('editor'), (req, res
     [uid]
   )
 
-  // Get batch items for each
+  // Get batch items for each (orders + standalone entries)
   for (const batch of batches) {
     batch.items = all(
       `SELECT epi.*, o.title as order_title FROM editor_payment_items epi
        JOIN orders o ON o.id = epi.order_id WHERE epi.batch_id = ?`,
+      [batch.id]
+    )
+    batch.entries = all(
+      `SELECT ese.id, ese.amount, ese.description, ese.entry_date, 'standalone' as item_type
+       FROM editor_standalone_entries ese WHERE ese.batch_id = ?`,
       [batch.id]
     )
   }
@@ -2004,14 +2009,27 @@ router.get('/editor/financial', authMiddleware, requireRole('editor'), (req, res
     [uid, ...cidList]
   )
 
+  // Get standalone entries for this editor
+  const standaloneEntries = all(
+    `SELECT ese.*, comp.name as company_name,
+       CASE WHEN ese.batch_id IS NOT NULL THEN 'in_batch' ELSE 'pending' END as entry_status
+     FROM editor_standalone_entries ese
+     JOIN companies comp ON comp.id = ese.company_id
+     WHERE ese.editor_id = ? AND ese.company_id IN (${placeholder})
+     ORDER BY ese.entry_date DESC`,
+    [uid, ...cidList]
+  )
+
   const totalEarned = batches.filter(b => b.status === 'paid').reduce((s, b) => s + b.total_amount, 0)
   const totalPending = batches.filter(b => b.status === 'pending').reduce((s, b) => s + b.total_amount, 0)
   const totalAssigned = ordersSummary.reduce((s, o) => s + (o.editor_value || 0), 0)
+  const totalEntries = standaloneEntries.reduce((s, e) => s + (e.amount || 0), 0)
 
   res.json({
-    stats: { totalEarned, totalPending, totalAssigned, batchCount: batches.length },
+    stats: { totalEarned, totalPending, totalAssigned, totalEntries, batchCount: batches.length },
     batches,
     orders: ordersSummary,
+    standaloneEntries,
   })
 })
 

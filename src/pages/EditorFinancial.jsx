@@ -18,7 +18,7 @@ export default function EditorFinancial() {
 
   if (loading) return <Spinner />
 
-  const { stats, batches, orders } = data || { stats: {}, batches: [], orders: [] }
+  const { stats, batches, orders, standaloneEntries = [] } = data || { stats: {}, batches: [], orders: [], standaloneEntries: [] }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -36,7 +36,7 @@ export default function EditorFinancial() {
           { label: 'Total recebido', value: fmtBRL(stats.totalEarned || 0), color: theme.colors.mint },
           { label: 'Pendente', value: fmtBRL(stats.totalPending || 0), color: theme.colors.warm },
           { label: 'Total atribuido', value: fmtBRL(stats.totalAssigned || 0), color: theme.colors.primary },
-          { label: 'Lotes', value: stats.batchCount || 0, color: theme.colors.text, isNumber: true },
+          { label: 'Lançamentos avulsos', value: fmtBRL(stats.totalEntries || 0), color: theme.colors.gold },
         ].map((m, i) => (
           <div key={i} style={{ ...panelStyle, padding: 20 }}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>{m.label}</div>
@@ -78,7 +78,7 @@ export default function EditorFinancial() {
                     </div>
                     <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 2 }}>
                       {new Date(batch.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
-                      {batch.items?.length > 0 && ` · ${batch.items.length} pedido${batch.items.length !== 1 ? 's' : ''}`}
+                      {(batch.items?.length > 0 || batch.entries?.length > 0) && ` · ${(batch.items?.length || 0) + (batch.entries?.length || 0)} item(ns)`}
                     </div>
                   </div>
                   <span style={{
@@ -118,20 +118,35 @@ export default function EditorFinancial() {
                         <div style={{ fontSize: 12.5, color: theme.colors.textSecondary }}>{batch.notes}</div>
                       </div>
                     )}
-                    {batch.items && batch.items.length > 0 && (
+                    {((batch.items && batch.items.length > 0) || (batch.entries && batch.entries.length > 0)) && (
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr>
-                            <th className="eyebrow" style={{ padding: '8px 12px', textAlign: 'left', borderBottom: `1px solid ${theme.colors.border}` }}>Pedido</th>
+                            <th className="eyebrow" style={{ padding: '8px 12px', textAlign: 'left', borderBottom: `1px solid ${theme.colors.border}` }}>Descrição</th>
+                            <th className="eyebrow" style={{ padding: '8px 12px', textAlign: 'center', borderBottom: `1px solid ${theme.colors.border}`, width: 80 }}>Tipo</th>
                             <th className="eyebrow" style={{ padding: '8px 12px', textAlign: 'right', borderBottom: `1px solid ${theme.colors.border}` }}>Valor</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {batch.items.map((item, idx) => (
-                            <tr key={idx} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                          {(batch.items || []).map((item, idx) => (
+                            <tr key={`o-${idx}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
                               <td style={{ padding: '10px 12px', fontSize: 13, color: theme.colors.text }}>{item.order_title}</td>
+                              <td style={{ padding: '10px 12px', fontSize: 11, textAlign: 'center' }}>
+                                <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(100,149,237,0.12)', color: '#6495ed', fontWeight: 500 }}>Trabalho</span>
+                              </td>
                               <td style={{ padding: '10px 12px', fontSize: 13, textAlign: 'right' }} className="mono tnum">
                                 <span style={{ color: theme.colors.mint }}>{fmtBRL(item.amount)}</span>
+                              </td>
+                            </tr>
+                          ))}
+                          {(batch.entries || []).map((entry, idx) => (
+                            <tr key={`e-${idx}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                              <td style={{ padding: '10px 12px', fontSize: 13, color: theme.colors.text }}>{entry.description}</td>
+                              <td style={{ padding: '10px 12px', fontSize: 11, textAlign: 'center' }}>
+                                <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(255,165,0,0.12)', color: theme.colors.warm, fontWeight: 500 }}>Avulso</span>
+                              </td>
+                              <td style={{ padding: '10px 12px', fontSize: 13, textAlign: 'right' }} className="mono tnum">
+                                <span style={{ color: theme.colors.warm }}>{fmtBRL(entry.amount)}</span>
                               </td>
                             </tr>
                           ))}
@@ -145,6 +160,38 @@ export default function EditorFinancial() {
           </div>
         )}
       </div>
+
+      {/* Standalone entries */}
+      {standaloneEntries.filter(e => e.entry_status === 'pending').length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Lançamentos avulsos pendentes</div>
+          <div style={{ ...panelStyle, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: theme.colors.bgSecondary }}>
+                  {['Descrição', 'Equipe', 'Data', 'Valor'].map(h => (
+                    <th key={h} className="eyebrow" style={{ padding: '12px 14px', textAlign: 'left', borderBottom: `1px solid ${theme.colors.border}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {standaloneEntries.filter(e => e.entry_status === 'pending').map(e => (
+                  <tr key={e.id} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                    <td style={{ padding: '12px 14px', fontSize: 13, color: theme.colors.text }}>{e.description}</td>
+                    <td style={{ padding: '12px 14px', fontSize: 11.5, color: theme.colors.textFaint }}>{e.company_name}</td>
+                    <td style={{ padding: '12px 14px', fontSize: 12, color: theme.colors.textMuted }}>
+                      {e.entry_date ? new Date(e.entry_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                    </td>
+                    <td style={{ padding: '12px 14px', fontSize: 13 }} className="mono tnum">
+                      <span style={{ color: theme.colors.warm, fontWeight: 500 }}>{fmtBRL(e.amount)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Orders with values */}
       <div>
