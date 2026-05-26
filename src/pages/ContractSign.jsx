@@ -1,5 +1,5 @@
-// src/pages/ContractSign.jsx — Public contract signing page with OTP + canvas signature
-import { useState, useEffect, useRef } from 'react'
+// src/pages/ContractSign.jsx — Public contract signing page with typed signature + OTP
+import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import api from '../api'
 import theme from '../styles/theme'
@@ -27,6 +27,13 @@ function maskCPF(v) {
   return v
 }
 
+// Cursive font styles (Google Font loaded dynamically)
+const CURSIVE_FONTS = [
+  { name: 'Dancing Script', label: 'Cursiva' },
+  { name: 'Great Vibes', label: 'Elegante' },
+  { name: 'Caveat', label: 'Manuscrita' },
+]
+
 export default function ContractSign() {
   const { token } = useParams()
   const [contract, setContract] = useState(null)
@@ -36,14 +43,25 @@ export default function ContractSign() {
   const [signerName, setSignerName] = useState('')
   const [signerCPF, setSignerCPF] = useState('')
   const [cpfError, setCpfError] = useState('')
+  const [selectedFont, setSelectedFont] = useState(CURSIVE_FONTS[0].name)
   const [otpSent, setOtpSent] = useState(false)
   const [otpCode, setOtpCode] = useState('')
   const [otpEmail, setOtpEmail] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [signedAt, setSignedAt] = useState(null)
-  const canvasRef = useRef(null)
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [hasSignature, setHasSignature] = useState(false)
+  const [fontsLoaded, setFontsLoaded] = useState(false)
+
+  // Load Google Fonts
+  useEffect(() => {
+    const families = CURSIVE_FONTS.map(f => f.name.replace(/ /g, '+')).join('&family=')
+    const link = document.createElement('link')
+    link.href = `https://fonts.googleapis.com/css2?family=${families}&display=swap`
+    link.rel = 'stylesheet'
+    document.head.appendChild(link)
+    link.onload = () => setFontsLoaded(true)
+    setTimeout(() => setFontsLoaded(true), 2000) // fallback
+    return () => { try { document.head.removeChild(link) } catch {} }
+  }, [])
 
   useEffect(() => {
     loadContract()
@@ -69,55 +87,22 @@ export default function ContractSign() {
     }
   }
 
-  // Canvas drawing
-  function startDraw(e) {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    setIsDrawing(true)
-    const ctx = canvas.getContext('2d')
-    const rect = canvas.getBoundingClientRect()
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
-    ctx.beginPath()
-    ctx.moveTo(x, y)
-  }
-
-  function draw(e) {
-    if (!isDrawing) return
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    const rect = canvas.getBoundingClientRect()
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
-    ctx.lineWidth = 2
-    ctx.lineCap = 'round'
-    ctx.strokeStyle = '#111'
-    ctx.lineTo(x, y)
-    ctx.stroke()
-    setHasSignature(true)
-  }
-
-  function endDraw() {
-    setIsDrawing(false)
-  }
-
-  function clearCanvas() {
-    const canvas = canvasRef.current
-    if (!canvas) return
+  // Generate signature image from typed name using canvas (for PDF/audit)
+  function generateSignatureImage() {
+    const canvas = document.createElement('canvas')
+    canvas.width = 600
+    canvas.height = 150
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    setHasSignature(false)
-  }
-
-  function getSignatureImage() {
-    const canvas = canvasRef.current
-    if (!canvas || !hasSignature) return null
+    ctx.font = `48px '${selectedFont}', cursive`
+    ctx.fillStyle = '#111'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(signerName, canvas.width / 2, canvas.height / 2)
     return canvas.toDataURL('image/png')
   }
 
   async function handleSendOTP() {
-    // Validate CPF
     const rawCpf = signerCPF.replace(/\D/g, '')
     if (rawCpf.length !== 11 || !validateCPF(rawCpf)) {
       setCpfError('CPF invalido')
@@ -154,7 +139,6 @@ export default function ContractSign() {
     }
     setSubmitting(true)
     try {
-      // Get geolocation if available
       let geolocation = null
       try {
         const pos = await new Promise((resolve, reject) =>
@@ -167,7 +151,8 @@ export default function ContractSign() {
         otp: otpCode,
         signer_name: signerName,
         signer_cpf: signerCPF,
-        signature_image: getSignatureImage(),
+        signature_image: generateSignatureImage(),
+        signature_font: selectedFont,
         geolocation,
       })
       if (data.error) {
@@ -183,7 +168,7 @@ export default function ContractSign() {
     }
   }
 
-  // Party type labels
+  // Party helpers
   function getPartyTypeLabel(tipo) {
     if (tipo === 'pj') return 'pessoa juridica de direito privado'
     if (tipo === 'mei') return 'microempreendedor individual'
@@ -198,6 +183,16 @@ export default function ContractSign() {
     if ((tipo === 'pj' || tipo === 'mei') && cnpj) parts.push(`inscrita no CNPJ sob o n. ${cnpj}`)
     if (cpf) parts.push(`CPF n. ${cpf}`)
     return parts.join(', ')
+  }
+
+  function getTopics(clause) {
+    if (clause.topics && Array.isArray(clause.topics)) {
+      if (clause.topics.length > 0 && typeof clause.topics[0] === 'string') {
+        return clause.topics.map(t => ({ text: t, subtopics: [] }))
+      }
+      return clause.topics
+    }
+    return []
   }
 
   if (loading) return (
@@ -228,24 +223,13 @@ export default function ContractSign() {
           <div><strong>Documento:</strong> {contract.title}</div>
           <div><strong>Assinante:</strong> {signerName}</div>
           <div><strong>CPF:</strong> {signerCPF}</div>
-          <div><strong>Hash do documento:</strong> <span style={{ fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all' }}>{contract.document_hash}</span></div>
+          <div style={{ marginTop: 8 }}><strong>Hash:</strong> <span style={{ fontFamily: 'monospace', fontSize: 10, wordBreak: 'break-all' }}>{contract.document_hash}</span></div>
         </div>
       </div>
     </div>
   )
 
   const clauses = contract.clauses || []
-
-  // Migrate old format
-  function getTopics(clause) {
-    if (clause.topics && Array.isArray(clause.topics)) {
-      if (clause.topics.length > 0 && typeof clause.topics[0] === 'string') {
-        return clause.topics.map(t => ({ text: t, subtopics: [] }))
-      }
-      return clause.topics
-    }
-    return []
-  }
 
   return (
     <div style={{ minHeight: '100vh', background: theme.colors.bg, padding: '32px 16px' }}>
@@ -366,32 +350,56 @@ export default function ContractSign() {
                 {cpfError && <div style={{ fontSize: 11, color: theme.colors.danger, marginTop: 4 }}>{cpfError}</div>}
               </div>
 
-              {/* Signature canvas */}
+              {/* Typed signature preview */}
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>Assinatura (desenhe abaixo)</label>
-                <div style={{ position: 'relative', border: `1px solid ${theme.colors.border}`, borderRadius: 8, overflow: 'hidden' }}>
-                  <canvas
-                    ref={canvasRef}
-                    width={600}
-                    height={150}
-                    style={{ width: '100%', height: 150, background: '#fff', cursor: 'crosshair', touchAction: 'none' }}
-                    onMouseDown={startDraw}
-                    onMouseMove={draw}
-                    onMouseUp={endDraw}
-                    onMouseLeave={endDraw}
-                    onTouchStart={startDraw}
-                    onTouchMove={draw}
-                    onTouchEnd={endDraw}
-                  />
-                  {hasSignature && (
-                    <button onClick={clearCanvas} style={{
-                      position: 'absolute', top: 6, right: 6,
-                      background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none',
-                      borderRadius: 4, padding: '4px 8px', fontSize: 10, cursor: 'pointer',
-                    }}>
-                      Limpar
+                <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontWeight: 500 }}>
+                  Sua assinatura digital
+                </label>
+
+                {/* Font selector */}
+                <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                  {CURSIVE_FONTS.map(f => (
+                    <button
+                      key={f.name}
+                      onClick={() => setSelectedFont(f.name)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                        border: `1px solid ${selectedFont === f.name ? theme.colors.primary + '66' : theme.colors.border}`,
+                        background: selectedFont === f.name ? theme.colors.primaryMuted : 'transparent',
+                        color: selectedFont === f.name ? theme.colors.primary : theme.colors.textMuted,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {f.label}
                     </button>
+                  ))}
+                </div>
+
+                {/* Signature preview box */}
+                <div style={{
+                  background: '#fff', borderRadius: 8, padding: '20px 24px',
+                  border: `1px solid ${theme.colors.border}`,
+                  minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  position: 'relative',
+                }}>
+                  {signerName.trim() ? (
+                    <div style={{
+                      fontFamily: `'${selectedFont}', cursive`,
+                      fontSize: 36, color: '#111', lineHeight: 1.2,
+                      userSelect: 'none', textAlign: 'center',
+                    }}>
+                      {signerName}
+                    </div>
+                  ) : (
+                    <div style={{ color: '#bbb', fontSize: 14, fontStyle: 'italic' }}>
+                      Digite seu nome acima para visualizar
+                    </div>
                   )}
+                  {/* Signature line */}
+                  <div style={{
+                    position: 'absolute', bottom: 16, left: 24, right: 24,
+                    height: 1, background: '#ddd',
+                  }} />
                 </div>
               </div>
 
@@ -410,7 +418,7 @@ export default function ContractSign() {
               </button>
 
               <p style={{ fontSize: 11.5, color: theme.colors.textMuted, textAlign: 'center', lineHeight: 1.5 }}>
-                Um codigo de 6 digitos sera enviado ao seu email cadastrado para confirmar a assinatura.
+                Ao assinar, voce concorda com os termos deste contrato. Um codigo de 6 digitos sera enviado ao seu email para confirmar a assinatura.
               </p>
             </div>
           </div>
@@ -441,6 +449,20 @@ export default function ContractSign() {
               maxLength={6}
               autoFocus
             />
+
+            {/* Preview of signature being confirmed */}
+            <div style={{
+              margin: '20px auto', maxWidth: 400, padding: '12px 20px',
+              background: '#fff', borderRadius: 8, border: `1px solid ${theme.colors.border}`,
+            }}>
+              <div style={{ fontSize: 10, color: '#999', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Assinatura</div>
+              <div style={{
+                fontFamily: `'${selectedFont}', cursive`,
+                fontSize: 28, color: '#111', textAlign: 'center',
+              }}>
+                {signerName}
+              </div>
+            </div>
 
             <button
               onClick={handleVerify}

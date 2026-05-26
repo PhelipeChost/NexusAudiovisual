@@ -1,5 +1,5 @@
 // src/pages/ClientDashboard.jsx — visao do cliente: kanban read-only + tabela + financeiro + portal de solicitacao
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import api from '../api'
 import { useAuth } from '../context/AuthContext'
 import theme from '../styles/theme'
@@ -944,20 +944,38 @@ function ClientOrderDetail({ order, onAction }) {
 }
 
 /* ============================================================
-   ClientContractTab — view full contract + sign from client portal
+   ClientContractTab — view full contract + typed signature from client portal
    ============================================================ */
+
+const CLIENT_CURSIVE_FONTS = [
+  { name: 'Dancing Script', label: 'Cursiva' },
+  { name: 'Great Vibes', label: 'Elegante' },
+  { name: 'Caveat', label: 'Manuscrita' },
+]
+
 function ClientContractTab({ contract, onSigned }) {
   const [step, setStep] = useState('view') // view → sign → otp → done
   const [signerName, setSignerName] = useState('')
   const [signerCPF, setSignerCPF] = useState('')
   const [cpfError, setCpfError] = useState('')
+  const [selectedFont, setSelectedFont] = useState(CLIENT_CURSIVE_FONTS[0].name)
   const [otpCode, setOtpCode] = useState('')
   const [otpEmail, setOtpEmail] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [signedAt, setSignedAt] = useState(null)
-  const canvasRef = React.useRef(null)
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [hasSignature, setHasSignature] = useState(false)
+
+  // Load Google Fonts
+  useEffect(() => {
+    const families = CLIENT_CURSIVE_FONTS.map(f => f.name.replace(/ /g, '+')).join('&family=')
+    const linkId = 'contract-cursive-fonts'
+    if (!document.getElementById(linkId)) {
+      const link = document.createElement('link')
+      link.id = linkId
+      link.href = `https://fonts.googleapis.com/css2?family=${families}&display=swap`
+      link.rel = 'stylesheet'
+      document.head.appendChild(link)
+    }
+  }, [])
 
   if (!contract || !contract.contract) {
     return (
@@ -1015,36 +1033,19 @@ function ClientContractTab({ contract, onSigned }) {
     return items.map(t => ({ text: t.text || '', subtopics: t.subtopics || [] }))
   }
 
-  // Canvas drawing
-  function startDraw(e) {
-    const canvas = canvasRef.current; if (!canvas) return
-    setIsDrawing(true)
+  // Generate signature image from typed name
+  function generateSignatureImage() {
+    const canvas = document.createElement('canvas')
+    canvas.width = 500
+    canvas.height = 120
     const ctx = canvas.getContext('2d')
-    const rect = canvas.getBoundingClientRect()
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
-    ctx.beginPath(); ctx.moveTo(x, y)
-  }
-  function draw(e) {
-    if (!isDrawing) return
-    const canvas = canvasRef.current; if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    const rect = canvas.getBoundingClientRect()
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
-    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#111'
-    ctx.lineTo(x, y); ctx.stroke()
-    setHasSignature(true)
-  }
-  function endDraw() { setIsDrawing(false) }
-  function clearCanvas() {
-    const canvas = canvasRef.current; if (!canvas) return
-    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height)
-    setHasSignature(false)
-  }
-  function getSignatureImage() {
-    const canvas = canvasRef.current
-    return (canvas && hasSignature) ? canvas.toDataURL('image/png') : null
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.font = `42px '${selectedFont}', cursive`
+    ctx.fillStyle = '#111'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(signerName, canvas.width / 2, canvas.height / 2)
+    return canvas.toDataURL('image/png')
   }
 
   async function handleSendOTP() {
@@ -1071,7 +1072,7 @@ function ClientContractTab({ contract, onSigned }) {
       } catch {}
       const data = await api.clientPortal.signContract({
         otp: otpCode, signer_name: signerName, signer_cpf: signerCPF,
-        signature_image: getSignatureImage(), geolocation,
+        signature_image: generateSignatureImage(), signature_font: selectedFont, geolocation,
       })
       if (data.error) { alert(data.error) }
       else { setSignedAt(data.signed_at); setStep('done'); onSigned && onSigned() }
@@ -1189,27 +1190,43 @@ function ClientContractTab({ contract, onSigned }) {
                 placeholder="000.000.000-00" maxLength={14} />
               {cpfError && <div style={{ fontSize: 11, color: '#f47383', marginTop: 4 }}>{cpfError}</div>}
             </Field>
+
+            {/* Typed signature */}
             <div>
-              <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4 }}>Assinatura (desenhe abaixo)</label>
-              <div style={{ position: 'relative', border: `1px solid ${theme.colors.border}`, borderRadius: 8, overflow: 'hidden' }}>
-                <canvas ref={canvasRef} width={500} height={120}
-                  style={{ width: '100%', height: 120, background: '#fff', cursor: 'crosshair', touchAction: 'none' }}
-                  onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
-                  onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
-                />
-                {hasSignature && (
-                  <button onClick={clearCanvas} style={{ position: 'absolute', top: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 10, cursor: 'pointer' }}>
-                    Limpar
-                  </button>
+              <label style={{ display: 'block', fontSize: 12, color: theme.colors.textMuted, marginBottom: 4 }}>Sua assinatura digital</label>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                {CLIENT_CURSIVE_FONTS.map(f => (
+                  <button key={f.name} onClick={() => setSelectedFont(f.name)}
+                    style={{
+                      padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                      border: `1px solid ${selectedFont === f.name ? theme.colors.primary + '66' : theme.colors.border}`,
+                      background: selectedFont === f.name ? theme.colors.primaryMuted : 'transparent',
+                      color: selectedFont === f.name ? theme.colors.primary : theme.colors.textMuted,
+                    }}>{f.label}</button>
+                ))}
+              </div>
+              <div style={{
+                background: '#fff', borderRadius: 8, padding: '16px 20px', minHeight: 64,
+                border: `1px solid ${theme.colors.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+              }}>
+                {signerName.trim() ? (
+                  <div style={{ fontFamily: `'${selectedFont}', cursive`, fontSize: 32, color: '#111', textAlign: 'center', userSelect: 'none' }}>
+                    {signerName}
+                  </div>
+                ) : (
+                  <div style={{ color: '#bbb', fontSize: 13, fontStyle: 'italic' }}>Digite seu nome acima</div>
                 )}
+                <div style={{ position: 'absolute', bottom: 12, left: 20, right: 20, height: 1, background: '#ddd' }} />
               </div>
             </div>
+
             <button onClick={handleSendOTP} disabled={submitting || !signerName.trim() || !signerCPF}
               style={{ ...btnPrimary, width: '100%', opacity: (submitting || !signerName.trim() || !signerCPF) ? 0.5 : 1 }}>
               {submitting ? 'Enviando...' : 'Enviar codigo de verificacao para meu email'}
             </button>
             <p style={{ fontSize: 11, color: theme.colors.textFaint, textAlign: 'center' }}>
-              Um codigo sera enviado ao email da sua conta para confirmar a assinatura.
+              Ao assinar, voce concorda com os termos. Um codigo sera enviado ao seu email para confirmar.
             </p>
           </div>
         </div>
@@ -1226,6 +1243,16 @@ function ClientContractTab({ contract, onSigned }) {
             style={{ width: 160, padding: '12px', borderRadius: 8, border: `1px solid ${theme.colors.border}`, background: theme.colors.bg, color: theme.colors.text, fontSize: 22, fontWeight: 700, textAlign: 'center', letterSpacing: 6, fontFamily: 'monospace' }}
             placeholder="000000" maxLength={6} autoFocus
           />
+          {/* Signature preview */}
+          <div style={{
+            margin: '16px auto', maxWidth: 320, padding: '10px 16px',
+            background: '#fff', borderRadius: 8, border: `1px solid ${theme.colors.border}`,
+          }}>
+            <div style={{ fontSize: 9, color: '#999', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Assinatura</div>
+            <div style={{ fontFamily: `'${selectedFont}', cursive`, fontSize: 24, color: '#111', textAlign: 'center' }}>
+              {signerName}
+            </div>
+          </div>
           <button onClick={handleVerify} disabled={submitting || otpCode.length !== 6}
             style={{ ...btnPrimary, display: 'block', width: '100%', maxWidth: 280, margin: '16px auto 0', opacity: (submitting || otpCode.length !== 6) ? 0.5 : 1 }}>
             {submitting ? 'Verificando...' : 'Confirmar assinatura'}
