@@ -284,6 +284,24 @@ async function initDb() {
     )
   `)
 
+  // ============ EDITOR STANDALONE ENTRIES (pagamentos avulsos) ============
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS editor_standalone_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      editor_id INTEGER NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      description TEXT NOT NULL,
+      entry_date DATE DEFAULT (DATE('now')),
+      batch_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (editor_id) REFERENCES users(id),
+      FOREIGN KEY (batch_id) REFERENCES editor_payment_batches(id) ON DELETE SET NULL
+    )
+  `)
+
   // ============ TEAM MEMBERSHIPS (multi-team editors) ============
 
   db.run(`

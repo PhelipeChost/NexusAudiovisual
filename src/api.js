@@ -158,6 +158,10 @@ const api = {
     deleteEditorBatch: (id) => request(`/financial/editor-batches/${id}`, { method: 'DELETE' }),
     getBatchItems: (id) => request(`/financial/editor-batches/${id}/items`),
 
+    // Editor standalone entries (lançamentos avulsos)
+    createEditorEntry: (data) => request('/financial/editor-entries', { method: 'POST', body: JSON.stringify(data) }),
+    deleteEditorEntry: (id) => request(`/financial/editor-entries/${id}`, { method: 'DELETE' }),
+
     // Daily records
     upsertDailyRecord: (data) => request('/financial/daily-record', { method: 'PUT', body: JSON.stringify(data) }),
   },

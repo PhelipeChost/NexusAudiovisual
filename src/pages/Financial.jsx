@@ -668,12 +668,15 @@ function EditorSheetTab({ month, lists }) {
   const [editorId, setEditorId] = useState('')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [selected, setSelected] = useState([])
+  const [selected, setSelected] = useState([])       // order IDs
+  const [selectedEntries, setSelectedEntries] = useState([]) // standalone entry IDs
   const [showBatchModal, setShowBatchModal] = useState(false)
   const [batchNotes, setBatchNotes] = useState('')
   const [detailModal, setDetailModal] = useState(null)
   const [detailData, setDetailData] = useState(null)
   const [proofUrl, setProofUrl] = useState('')
+  const [showEntryModal, setShowEntryModal] = useState(false)
+  const [entryForm, setEntryForm] = useState({ amount: '', description: '', entry_date: '' })
 
   const loadSheet = useCallback(() => {
     if (!editorId) return
@@ -686,17 +689,55 @@ function EditorSheetTab({ month, lists }) {
   function toggleSelect(id) {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
+  function toggleSelectEntry(id) {
+    setSelectedEntries(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
   function selectAll() {
     if (!data) return
-    setSelected(selected.length === data.unpaid.length ? [] : data.unpaid.map(o => o.id))
+    const allOrders = selected.length === data.unpaid.length
+    const allEntries = selectedEntries.length === (data.unpaidEntries || []).length
+    if (allOrders && allEntries) {
+      setSelected([])
+      setSelectedEntries([])
+    } else {
+      setSelected(data.unpaid.map(o => o.id))
+      setSelectedEntries((data.unpaidEntries || []).map(e => e.id))
+    }
   }
 
+  const totalSelectedCount = selected.length + selectedEntries.length
+
   async function handleCreateBatch() {
-    if (selected.length === 0) return
+    if (totalSelectedCount === 0) return
     try {
-      await api.financial.createEditorBatch({ editor_id: parseInt(editorId), order_ids: selected, notes: batchNotes || null })
-      setSelected([]); setBatchNotes(''); setShowBatchModal(false); loadSheet()
+      await api.financial.createEditorBatch({
+        editor_id: parseInt(editorId),
+        order_ids: selected.length > 0 ? selected : undefined,
+        entry_ids: selectedEntries.length > 0 ? selectedEntries : undefined,
+        notes: batchNotes || null,
+      })
+      setSelected([]); setSelectedEntries([]); setBatchNotes(''); setShowBatchModal(false); loadSheet()
     } catch (err) { alert(err.message) }
+  }
+
+  async function handleCreateEntry() {
+    if (!entryForm.amount || !entryForm.description) return
+    try {
+      await api.financial.createEditorEntry({
+        editor_id: parseInt(editorId),
+        amount: parseFloat(entryForm.amount),
+        description: entryForm.description,
+        entry_date: entryForm.entry_date || undefined,
+      })
+      setEntryForm({ amount: '', description: '', entry_date: '' })
+      setShowEntryModal(false)
+      loadSheet()
+    } catch (err) { alert(err.message) }
+  }
+
+  async function handleDeleteEntry(entryId) {
+    if (!confirm('Excluir este lançamento avulso?')) return
+    try { await api.financial.deleteEditorEntry(entryId); loadSheet() } catch (err) { alert(err.message) }
   }
   async function handlePayBatch(batchId) {
     try {
@@ -718,7 +759,7 @@ function EditorSheetTab({ month, lists }) {
       <div style={{ ...panelStyle, padding: 18, display: 'flex', alignItems: 'center', gap: 14 }}>
         <select
           value={editorId}
-          onChange={e => { setEditorId(e.target.value); setData(null); setSelected([]) }}
+          onChange={e => { setEditorId(e.target.value); setData(null); setSelected([]); setSelectedEntries([]) }}
           style={{ ...inputStyle, maxWidth: 320, cursor: 'pointer' }}
         >
           <option value="">Selecione um editor…</option>
@@ -745,18 +786,22 @@ function EditorSheetTab({ month, lists }) {
               </h3>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                 <div style={{ fontSize: 12, color: theme.colors.textMuted }}>
-                  {data.orders.length} trabalho{data.orders.length !== 1 ? 's' : ''} no mês
+                  {data.orders.length} trabalho{data.orders.length !== 1 ? 's' : ''}
+                  {(data.monthEntries || []).length > 0 && ` + ${(data.monthEntries || []).length} avulso(s)`}
                 </div>
                 <div className="mono tnum" style={{ fontSize: 14, fontWeight: 600, color: theme.colors.primary }}>
-                  Total: {fmtBRL(data.orders.reduce((s, o) => s + (o.editor_value || 0), 0), true)}
+                  Total: {fmtBRL(
+                    data.orders.reduce((s, o) => s + (o.editor_value || 0), 0) +
+                    (data.monthEntries || []).reduce((s, e) => s + (e.amount || 0), 0)
+                  , true)}
                 </div>
               </div>
             </div>
-            {data.orders.length > 0 ? (
+            {(data.orders.length > 0 || (data.monthEntries || []).length > 0) ? (
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
                 <thead>
                   <tr style={{ background: theme.colors.bgSecondary }}>
-                    {['Dia', 'Trabalhos entregues', 'Cliente', 'Valor editor', 'Status'].map((h, i) => (
+                    {['Dia', 'Descrição', 'Info', 'Valor editor', 'Status'].map((h, i) => (
                       <th key={h} className="eyebrow" style={{
                         padding: '10px 14px',
                         textAlign: i === 3 ? 'right' : 'left',
@@ -770,43 +815,83 @@ function EditorSheetTab({ month, lists }) {
                   {(() => {
                     const days = getDaysInMonth(month)
                     const weekDays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+                    const mEntries = data.monthEntries || []
                     return days.map(dateStr => {
                       const dayOrders = data.orders.filter(o => {
                         const oDate = (o.updated_at || o.created_at || '').substring(0, 10)
                         return oDate === dateStr
                       })
-                      if (dayOrders.length === 0) return null
+                      const dayEntries = mEntries.filter(e => e.entry_date === dateStr)
+                      const totalRows = dayOrders.length + dayEntries.length
+                      if (totalRows === 0) return null
                       const dayNum = parseInt(dateStr.split('-')[2])
                       const dow = weekDays[new Date(dateStr + 'T12:00:00').getDay()]
-                      return dayOrders.map((o, oi) => (
-                        <tr key={`${dateStr}-${o.id}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
-                          {oi === 0 && (
-                            <td rowSpan={dayOrders.length} style={{ padding: '10px 14px', verticalAlign: 'top' }}>
-                              <span className="mono" style={{ fontSize: 13, color: theme.colors.text }}>{String(dayNum).padStart(2, '0')}</span>
-                              <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.textFaint }}>{dow}</span>
+                      const rows = []
+                      dayOrders.forEach((o, oi) => {
+                        rows.push(
+                          <tr key={`${dateStr}-o-${o.id}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                            {oi === 0 && dayEntries.length === 0 && (
+                              <td rowSpan={totalRows} style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                                <span className="mono" style={{ fontSize: 13, color: theme.colors.text }}>{String(dayNum).padStart(2, '0')}</span>
+                                <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.textFaint }}>{dow}</span>
+                              </td>
+                            )}
+                            {oi === 0 && dayEntries.length > 0 && (
+                              <td rowSpan={totalRows} style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                                <span className="mono" style={{ fontSize: 13, color: theme.colors.text }}>{String(dayNum).padStart(2, '0')}</span>
+                                <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.textFaint }}>{dow}</span>
+                              </td>
+                            )}
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{
+                                padding: '2px 8px', background: theme.colors.primaryMuted,
+                                borderRadius: 4, fontSize: 11.5, color: theme.colors.primary, fontWeight: 500,
+                              }}>{o.title}</span>
                             </td>
-                          )}
-                          <td style={{ padding: '10px 14px' }}>
-                            <span style={{
-                              padding: '2px 8px', background: theme.colors.primaryMuted,
-                              borderRadius: 4, fontSize: 11.5, color: theme.colors.primary, fontWeight: 500,
-                            }}>{o.title}</span>
-                          </td>
-                          <td style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textMuted }}>{o.client_name}</td>
-                          <td style={{ padding: '10px 14px', textAlign: 'right' }} className="mono tnum">
-                            {o.editor_value > 0
-                              ? <span style={{ color: theme.colors.primary, fontWeight: 600 }}>{fmtBRL(o.editor_value, true)}</span>
-                              : <span style={{ color: theme.colors.textFaint }}>—</span>}
-                          </td>
-                          <td style={{ padding: '10px 14px' }}>
-                            <Badge color={
-                              o.batch_status === 'paid' ? 'mint' : o.batch_id ? 'gold' : o.column_name?.toLowerCase().includes('finaliz') ? 'blue' : 'default'
-                            }>
-                              {o.batch_status === 'paid' ? 'Pago' : o.batch_id ? 'Em lote' : o.column_name || '—'}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))
+                            <td style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textMuted }}>{o.client_name}</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }} className="mono tnum">
+                              {o.editor_value > 0
+                                ? <span style={{ color: theme.colors.primary, fontWeight: 600 }}>{fmtBRL(o.editor_value, true)}</span>
+                                : <span style={{ color: theme.colors.textFaint }}>—</span>}
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <Badge color={
+                                o.batch_status === 'paid' ? 'mint' : o.batch_id ? 'gold' : o.column_name?.toLowerCase().includes('finaliz') ? 'blue' : 'default'
+                              }>
+                                {o.batch_status === 'paid' ? 'Pago' : o.batch_id ? 'Em lote' : o.column_name || '—'}
+                              </Badge>
+                            </td>
+                          </tr>
+                        )
+                      })
+                      dayEntries.forEach((e, ei) => {
+                        rows.push(
+                          <tr key={`${dateStr}-e-${e.id}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                            {dayOrders.length === 0 && ei === 0 && (
+                              <td rowSpan={totalRows} style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                                <span className="mono" style={{ fontSize: 13, color: theme.colors.text }}>{String(dayNum).padStart(2, '0')}</span>
+                                <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.textFaint }}>{dow}</span>
+                              </td>
+                            )}
+                            <td style={{ padding: '10px 14px' }}>
+                              <span style={{
+                                padding: '2px 8px', background: 'rgba(255,165,0,0.12)',
+                                borderRadius: 4, fontSize: 11.5, color: theme.colors.warm, fontWeight: 500,
+                              }}>{e.description}</span>
+                            </td>
+                            <td style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textFaint, fontStyle: 'italic' }}>Avulso</td>
+                            <td style={{ padding: '10px 14px', textAlign: 'right' }} className="mono tnum">
+                              <span style={{ color: theme.colors.warm, fontWeight: 600 }}>{fmtBRL(e.amount, true)}</span>
+                            </td>
+                            <td style={{ padding: '10px 14px' }}>
+                              <Badge color={e.batch_id ? (e.batch_status === 'paid' ? 'mint' : 'gold') : 'warm'}>
+                                {e.batch_id ? (e.batch_status === 'paid' ? 'Pago' : 'Em lote') : 'Pendente'}
+                              </Badge>
+                            </td>
+                          </tr>
+                        )
+                      })
+                      return rows
                     })
                   })()}
                 </tbody>
@@ -815,10 +900,14 @@ function EditorSheetTab({ month, lists }) {
                     <td style={{ padding: '12px 14px' }} className="eyebrow">total</td>
                     <td style={{ padding: '12px 14px', fontSize: 12, color: theme.colors.textMuted }}>
                       {data.orders.length} trabalho{data.orders.length !== 1 ? 's' : ''}
+                      {(data.monthEntries || []).length > 0 && ` + ${(data.monthEntries || []).length} avulso(s)`}
                     </td>
                     <td style={{ padding: '12px 14px' }}></td>
                     <td style={{ padding: '12px 14px', textAlign: 'right', color: theme.colors.primary, fontWeight: 600 }} className="mono tnum">
-                      {fmtBRL(data.orders.reduce((s, o) => s + (o.editor_value || 0), 0), true)}
+                      {fmtBRL(
+                        data.orders.reduce((s, o) => s + (o.editor_value || 0), 0) +
+                        (data.monthEntries || []).reduce((s, e) => s + (e.amount || 0), 0)
+                      , true)}
                     </td>
                     <td style={{ padding: '12px 14px' }}></td>
                   </tr>
@@ -834,49 +923,81 @@ function EditorSheetTab({ month, lists }) {
           {/* Unpaid */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 className="display" style={{ fontSize: 17, color: theme.colors.text, margin: 0 }}>
-              Trabalhos não pagos ({data.unpaid.length})
+              Pendentes ({data.unpaid.length + (data.unpaidEntries || []).length})
             </h3>
-            {data.unpaid.length > 0 && (
+            <div style={{ display: 'flex', gap: 8 }}>
               <button
-                onClick={() => { if (selected.length === 0) { alert('Selecione pelo menos um trabalho'); return } setShowBatchModal(true) }}
-                style={{ ...btnPrimary, fontSize: 12, padding: '8px 14px' }}
+                onClick={() => setShowEntryModal(true)}
+                style={{ ...btnSoft, fontSize: 12, padding: '8px 14px' }}
               >
-                Registrar pagamento ({selected.length})
+                <Icon name="plus" size={12} /> Lançamento avulso
               </button>
-            )}
+              {(data.unpaid.length > 0 || (data.unpaidEntries || []).length > 0) && (
+                <button
+                  onClick={() => { if (totalSelectedCount === 0) { alert('Selecione pelo menos um item'); return } setShowBatchModal(true) }}
+                  style={{ ...btnPrimary, fontSize: 12, padding: '8px 14px' }}
+                >
+                  Registrar pagamento ({totalSelectedCount})
+                </button>
+              )}
+            </div>
           </div>
 
-          {data.unpaid.length > 0 ? (
+          {(data.unpaid.length > 0 || (data.unpaidEntries || []).length > 0) ? (
             <div style={{ ...panelStyle, overflow: 'hidden' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: theme.colors.bgSecondary }}>
                     <th style={{ width: 40, padding: '10px 16px', borderBottom: `1px solid ${theme.colors.border}` }}>
-                      <input type="checkbox" checked={selected.length === data.unpaid.length && data.unpaid.length > 0} onChange={selectAll} style={{ cursor: 'pointer', accentColor: theme.colors.primary }} />
+                      <input type="checkbox" checked={selected.length === data.unpaid.length && selectedEntries.length === (data.unpaidEntries || []).length && (data.unpaid.length + (data.unpaidEntries || []).length) > 0} onChange={selectAll} style={{ cursor: 'pointer', accentColor: theme.colors.primary }} />
                     </th>
-                    {['Pedido', 'Cliente', 'Valor', 'Cliente pagou', 'Data'].map(h => (
+                    {['Descrição', 'Tipo', 'Valor', 'Info', 'Data', ''].map(h => (
                       <th key={h} className="eyebrow" style={{ padding: '10px 16px', textAlign: 'left', borderBottom: `1px solid ${theme.colors.border}` }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {data.unpaid.map(o => (
-                    <tr key={o.id}
+                    <tr key={`order-${o.id}`}
                       onClick={() => toggleSelect(o.id)}
                       style={{ background: selected.includes(o.id) ? theme.colors.primaryMuted : 'transparent', cursor: 'pointer', borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
                       <td style={{ padding: '10px 16px' }}>
                         <input type="checkbox" checked={selected.includes(o.id)} onChange={() => toggleSelect(o.id)} onClick={e => e.stopPropagation()} style={{ cursor: 'pointer', accentColor: theme.colors.primary }} />
                       </td>
                       <td style={{ padding: '10px 16px', fontSize: 13, color: theme.colors.text }}>{o.title}</td>
-                      <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>{o.client_name}</td>
+                      <td style={{ padding: '10px 16px' }}>
+                        <Badge color="blue">Trabalho</Badge>
+                      </td>
                       <td style={{ padding: '10px 16px', fontWeight: 600 }} className="mono tnum">
                         <span style={{ color: theme.colors.mint }}>{fmtBRL(o.editor_value, true)}</span>
                       </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        <Badge color={o.client_paid === 'paid' ? 'mint' : 'gold'}>{o.client_paid === 'paid' ? 'SIM' : 'NÃO'}</Badge>
-                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>{o.client_name}</td>
                       <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>
                         {o.updated_at ? new Date(o.updated_at).toLocaleDateString('pt-BR') : '—'}
+                      </td>
+                      <td style={{ padding: '10px 16px' }}></td>
+                    </tr>
+                  ))}
+                  {(data.unpaidEntries || []).map(e => (
+                    <tr key={`entry-${e.id}`}
+                      onClick={() => toggleSelectEntry(e.id)}
+                      style={{ background: selectedEntries.includes(e.id) ? 'rgba(255,165,0,0.08)' : 'transparent', cursor: 'pointer', borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                      <td style={{ padding: '10px 16px' }}>
+                        <input type="checkbox" checked={selectedEntries.includes(e.id)} onChange={() => toggleSelectEntry(e.id)} onClick={ev => ev.stopPropagation()} style={{ cursor: 'pointer', accentColor: theme.colors.warm }} />
+                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 13, color: theme.colors.text }}>{e.description}</td>
+                      <td style={{ padding: '10px 16px' }}>
+                        <Badge color="warm">Avulso</Badge>
+                      </td>
+                      <td style={{ padding: '10px 16px', fontWeight: 600 }} className="mono tnum">
+                        <span style={{ color: theme.colors.warm }}>{fmtBRL(e.amount, true)}</span>
+                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>—</td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>
+                        {e.entry_date ? new Date(e.entry_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                      </td>
+                      <td style={{ padding: '10px 16px' }}>
+                        <button onClick={ev => { ev.stopPropagation(); handleDeleteEntry(e.id) }} style={{ padding: '3px 8px', background: theme.colors.dangerMuted, border: 'none', borderRadius: 4, color: theme.colors.danger, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>Excluir</button>
                       </td>
                     </tr>
                   ))}
@@ -885,7 +1006,7 @@ function EditorSheetTab({ month, lists }) {
             </div>
           ) : (
             <div style={{ ...panelStyle, textAlign: 'center', padding: 24, color: theme.colors.textMuted, fontSize: 13 }}>
-              Todos os trabalhos já foram pagos
+              Nenhum pagamento pendente
             </div>
           )}
 
@@ -937,11 +1058,30 @@ function EditorSheetTab({ month, lists }) {
       {/* Create batch modal */}
       <Modal open={showBatchModal} onClose={() => setShowBatchModal(false)} title="Registrar pagamento" subtitle="lote" width={520}>
         <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: 14, color: theme.colors.text, marginBottom: 12 }}>
-            <strong>{selected.length}</strong> trabalho(s) selecionado(s) · Total:{' '}
-            <strong style={{ color: theme.colors.mint }} className="mono tnum">
-              {fmtBRL(data?.unpaid?.filter(o => selected.includes(o.id)).reduce((s, o) => s + (o.editor_value || 0), 0) || 0)}
-            </strong>
+          {selected.length > 0 && (
+            <p style={{ fontSize: 13, color: theme.colors.text, marginBottom: 6 }}>
+              <strong>{selected.length}</strong> trabalho(s):{' '}
+              <strong style={{ color: theme.colors.mint }} className="mono tnum">
+                {fmtBRL(data?.unpaid?.filter(o => selected.includes(o.id)).reduce((s, o) => s + (o.editor_value || 0), 0) || 0)}
+              </strong>
+            </p>
+          )}
+          {selectedEntries.length > 0 && (
+            <p style={{ fontSize: 13, color: theme.colors.text, marginBottom: 6 }}>
+              <strong>{selectedEntries.length}</strong> lançamento(s) avulso(s):{' '}
+              <strong style={{ color: theme.colors.warm }} className="mono tnum">
+                {fmtBRL((data?.unpaidEntries || []).filter(e => selectedEntries.includes(e.id)).reduce((s, e) => s + (e.amount || 0), 0) || 0)}
+              </strong>
+            </p>
+          )}
+          <p style={{ fontSize: 14, color: theme.colors.text, marginBottom: 12, fontWeight: 600, borderTop: `1px solid ${theme.colors.border}`, paddingTop: 8 }}>
+            Total do lote:{' '}
+            <span className="mono tnum" style={{ color: theme.colors.primary }}>
+              {fmtBRL(
+                (data?.unpaid?.filter(o => selected.includes(o.id)).reduce((s, o) => s + (o.editor_value || 0), 0) || 0) +
+                ((data?.unpaidEntries || []).filter(e => selectedEntries.includes(e.id)).reduce((s, e) => s + (e.amount || 0), 0) || 0)
+              )}
+            </span>
           </p>
           <Field label="Observações">
             <textarea value={batchNotes} onChange={e => setBatchNotes(e.target.value)} rows={3} placeholder="Observações…" style={{ ...inputStyle, resize: 'vertical', fontFamily: theme.fonts.ui }} />
@@ -973,10 +1113,21 @@ function EditorSheetTab({ month, lists }) {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <tbody>
                   {detailData.items.map(item => (
-                    <tr key={item.id} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                    <tr key={`order-${item.id}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
                       <td style={{ padding: '10px 16px', fontSize: 13, color: theme.colors.text }}>{item.order_title}</td>
+                      <td style={{ padding: '10px 16px' }}><Badge color="blue">Trabalho</Badge></td>
                       <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>{item.client_name}</td>
                       <td style={{ padding: '10px 16px', textAlign: 'right' }} className="mono tnum">{fmtBRL(item.amount, true)}</td>
+                    </tr>
+                  ))}
+                  {(detailData.entries || []).map(entry => (
+                    <tr key={`entry-${entry.id}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                      <td style={{ padding: '10px 16px', fontSize: 13, color: theme.colors.text }}>{entry.description}</td>
+                      <td style={{ padding: '10px 16px' }}><Badge color="warm">Avulso</Badge></td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>
+                        {entry.entry_date ? new Date(entry.entry_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                      </td>
+                      <td style={{ padding: '10px 16px', textAlign: 'right' }} className="mono tnum">{fmtBRL(entry.amount, true)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -994,6 +1145,25 @@ function EditorSheetTab({ month, lists }) {
             )}
           </div>
         ) : <Spinner />}
+      </Modal>
+
+      {/* Entry creation modal */}
+      <Modal open={showEntryModal} onClose={() => setShowEntryModal(false)} title="Lançamento avulso" subtitle="pagamento" width={460}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Field label="Valor (R$)">
+            <input type="number" step="0.01" min="0" value={entryForm.amount} onChange={e => setEntryForm(f => ({ ...f, amount: e.target.value }))} placeholder="0,00" style={inputStyle} />
+          </Field>
+          <Field label="Descrição / motivo">
+            <textarea value={entryForm.description} onChange={e => setEntryForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="Descreva o motivo do lançamento…" style={{ ...inputStyle, resize: 'vertical', fontFamily: theme.fonts.ui }} />
+          </Field>
+          <Field label="Data (opcional)">
+            <input type="date" value={entryForm.entry_date} onChange={e => setEntryForm(f => ({ ...f, entry_date: e.target.value }))} style={inputStyle} />
+          </Field>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button style={btnSoft} onClick={() => setShowEntryModal(false)}>Cancelar</button>
+          <button onClick={handleCreateEntry} style={btnPrimary} disabled={!entryForm.amount || !entryForm.description}>Registrar</button>
+        </div>
       </Modal>
     </div>
   )

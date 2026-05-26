@@ -1458,7 +1458,24 @@ router.get('/financial/editor-sheet/:editorId', authMiddleware, requireRole('ges
     ORDER BY epb.created_at DESC
   `, [editorId, cid])
 
-  res.json({ editor, orders, unpaid, batches })
+  // Standalone entries not yet in a batch (unpaid)
+  const unpaidEntries = all(`
+    SELECT ese.*, 'standalone' as entry_type
+    FROM editor_standalone_entries ese
+    WHERE ese.editor_id = ? AND ese.company_id = ? AND ese.batch_id IS NULL
+    ORDER BY ese.entry_date DESC
+  `, [editorId, cid])
+
+  // All standalone entries for this month (for the spreadsheet)
+  const monthEntries = all(`
+    SELECT ese.*, 'standalone' as entry_type
+    FROM editor_standalone_entries ese
+    WHERE ese.editor_id = ? AND ese.company_id = ?
+    AND ese.entry_date BETWEEN ? AND ?
+    ORDER BY ese.entry_date ASC
+  `, [editorId, cid, startDate, endDate])
+
+  res.json({ editor, orders, unpaid, unpaidEntries, monthEntries, batches })
 })
 
 // Create client invoice (batch of orders)
@@ -1533,17 +1550,31 @@ router.get('/financial/client-invoices/:id/items', authMiddleware, requireRole('
   res.json({ invoice, items })
 })
 
-// Create editor payment batch
+// Create editor payment batch (supports orders + standalone entries)
 router.post('/financial/editor-batches', authMiddleware, requireRole('gestor'), (req, res) => {
-  const { editor_id, order_ids, notes } = req.body
-  if (!editor_id || !order_ids || order_ids.length === 0) {
-    return res.status(400).json({ error: 'Editor e pedidos são obrigatórios' })
+  const { editor_id, order_ids, entry_ids, notes } = req.body
+  const hasOrders = order_ids && order_ids.length > 0
+  const hasEntries = entry_ids && entry_ids.length > 0
+  if (!editor_id || (!hasOrders && !hasEntries)) {
+    return res.status(400).json({ error: 'Editor e pelo menos um item são obrigatórios' })
   }
 
   let totalAmount = 0
-  for (const oid of order_ids) {
-    const order = get('SELECT editor_value FROM orders WHERE id = ? AND company_id = ?', [oid, req.user.company_id])
-    if (order) totalAmount += (order.editor_value || 0)
+
+  // Sum order values
+  if (hasOrders) {
+    for (const oid of order_ids) {
+      const order = get('SELECT editor_value FROM orders WHERE id = ? AND company_id = ?', [oid, req.user.company_id])
+      if (order) totalAmount += (order.editor_value || 0)
+    }
+  }
+
+  // Sum standalone entry values
+  if (hasEntries) {
+    for (const eid of entry_ids) {
+      const entry = get('SELECT amount FROM editor_standalone_entries WHERE id = ? AND company_id = ? AND batch_id IS NULL', [eid, req.user.company_id])
+      if (entry) totalAmount += (entry.amount || 0)
+    }
   }
 
   const result = run(
@@ -1551,27 +1582,38 @@ router.post('/financial/editor-batches', authMiddleware, requireRole('gestor'), 
     [req.user.company_id, editor_id, totalAmount, notes || null]
   )
 
-  for (const oid of order_ids) {
-    const order = get('SELECT editor_value FROM orders WHERE id = ?', [oid])
-    run('INSERT INTO editor_payment_items (batch_id, order_id, amount) VALUES (?, ?, ?)',
-      [result.lastInsertRowid, oid, order?.editor_value || 0])
+  // Link orders to batch
+  if (hasOrders) {
+    for (const oid of order_ids) {
+      const order = get('SELECT editor_value FROM orders WHERE id = ?', [oid])
+      run('INSERT INTO editor_payment_items (batch_id, order_id, amount) VALUES (?, ?, ?)',
+        [result.lastInsertRowid, oid, order?.editor_value || 0])
+    }
+    // Also update the old payments table records to 'paid' status
+    for (const oid of order_ids) {
+      run("UPDATE payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ? AND editor_id = ? AND status = 'pending'",
+        [oid, editor_id])
+    }
   }
 
-  // Also update the old payments table records to 'paid' status
-  for (const oid of order_ids) {
-    run("UPDATE payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE order_id = ? AND editor_id = ? AND status = 'pending'",
-      [oid, editor_id])
+  // Link standalone entries to batch
+  if (hasEntries) {
+    for (const eid of entry_ids) {
+      run('UPDATE editor_standalone_entries SET batch_id = ? WHERE id = ?', [result.lastInsertRowid, eid])
+    }
   }
+
+  const itemCount = (hasOrders ? order_ids.length : 0) + (hasEntries ? entry_ids.length : 0)
 
   // Notify editor
   const editor = get('SELECT name FROM users WHERE id = ?', [editor_id])
   run('INSERT INTO notifications (company_id, user_id, type, title, message, reference_id, reference_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [req.user.company_id, editor_id, 'payment', 'Pagamento registrado',
-      `Lote de R$ ${totalAmount.toFixed(2)} (${order_ids.length} trabalhos) registrado`, result.lastInsertRowid, 'editor_batch'])
+      `Lote de R$ ${totalAmount.toFixed(2)} (${itemCount} itens) registrado`, result.lastInsertRowid, 'editor_batch'])
 
   run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
     [req.user.company_id, req.user.id, 'created', 'editor_batch', result.lastInsertRowid,
-      `Pagamento para ${editor?.name} - R$ ${totalAmount.toFixed(2)} (${order_ids.length} itens)`])
+      `Pagamento para ${editor?.name} - R$ ${totalAmount.toFixed(2)} (${itemCount} itens)`])
 
   const batch = get('SELECT * FROM editor_payment_batches WHERE id = ?', [result.lastInsertRowid])
   res.json(batch)
@@ -1604,12 +1646,15 @@ router.delete('/financial/editor-batches/:id', authMiddleware, requireRole('gest
       [item.order_id, batch.editor_id])
   }
 
+  // Unlink standalone entries from this batch
+  run('UPDATE editor_standalone_entries SET batch_id = NULL WHERE batch_id = ?', [req.params.id])
+
   run('DELETE FROM editor_payment_items WHERE batch_id = ?', [req.params.id])
   run('DELETE FROM editor_payment_batches WHERE id = ?', [req.params.id])
   res.json({ success: true })
 })
 
-// Get editor batch items
+// Get editor batch items (orders + standalone entries)
 router.get('/financial/editor-batches/:id/items', authMiddleware, requireRole('gestor'), (req, res) => {
   const items = all(`
     SELECT epi.*, o.title as order_title, c.name as client_name
@@ -1618,8 +1663,58 @@ router.get('/financial/editor-batches/:id/items', authMiddleware, requireRole('g
     LEFT JOIN clients c ON c.id = o.client_id
     WHERE epi.batch_id = ?
   `, [req.params.id])
+  const entries = all(`
+    SELECT ese.id, ese.amount, ese.description, ese.entry_date, 'standalone' as item_type
+    FROM editor_standalone_entries ese
+    WHERE ese.batch_id = ?
+  `, [req.params.id])
   const batch = get('SELECT epb.*, u.name as editor_name FROM editor_payment_batches epb JOIN users u ON u.id = epb.editor_id WHERE epb.id = ?', [req.params.id])
-  res.json({ batch, items })
+  res.json({ batch, items, entries })
+})
+
+// ============ EDITOR STANDALONE ENTRIES (lançamentos avulsos) ============
+
+// Create a standalone entry for an editor
+router.post('/financial/editor-entries', authMiddleware, requireRole('gestor'), (req, res) => {
+  const { editor_id, amount, description, entry_date } = req.body
+  if (!editor_id || !amount || !description) {
+    return res.status(400).json({ error: 'Editor, valor e descrição são obrigatórios' })
+  }
+
+  const parsedAmount = parseFloat(amount)
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Valor deve ser maior que zero' })
+  }
+
+  const result = run(
+    'INSERT INTO editor_standalone_entries (company_id, editor_id, amount, description, entry_date) VALUES (?, ?, ?, ?, ?)',
+    [req.user.company_id, editor_id, parsedAmount, description, entry_date || new Date().toISOString().substring(0, 10)]
+  )
+
+  const editor = get('SELECT name FROM users WHERE id = ?', [editor_id])
+  run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
+    [req.user.company_id, req.user.id, 'created', 'editor_entry', result.lastInsertRowid,
+      `Lançamento avulso para ${editor?.name} - R$ ${parsedAmount.toFixed(2)}: ${description}`])
+
+  // Notify editor
+  run('INSERT INTO notifications (company_id, user_id, type, title, message, reference_id, reference_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [req.user.company_id, editor_id, 'payment', 'Lançamento avulso registrado',
+      `R$ ${parsedAmount.toFixed(2)} — ${description}`, result.lastInsertRowid, 'editor_entry'])
+
+  const entry = get('SELECT * FROM editor_standalone_entries WHERE id = ?', [result.lastInsertRowid])
+  res.json(entry)
+})
+
+// Delete a standalone entry (only if not in a batch)
+router.delete('/financial/editor-entries/:id', authMiddleware, requireRole('gestor'), (req, res) => {
+  const entry = get(
+    'SELECT * FROM editor_standalone_entries WHERE id = ? AND company_id = ? AND batch_id IS NULL',
+    [req.params.id, req.user.company_id]
+  )
+  if (!entry) return res.status(404).json({ error: 'Lançamento não encontrado ou já em lote' })
+
+  run('DELETE FROM editor_standalone_entries WHERE id = ?', [req.params.id])
+  res.json({ success: true })
 })
 
 // Upsert daily record
