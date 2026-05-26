@@ -737,6 +737,100 @@ function EditorSheetTab({ month, lists }) {
 
       {editorId && data && !loading && (
         <>
+          {/* Editor Spreadsheet — daily view like client sheet */}
+          <div style={{ ...panelStyle, padding: 0, overflow: 'auto' }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${theme.colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="display" style={{ fontSize: 18, margin: 0, color: theme.colors.text }}>
+                Planilha — {data.editor.name}
+              </h3>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                <div style={{ fontSize: 12, color: theme.colors.textMuted }}>
+                  {data.orders.length} trabalho{data.orders.length !== 1 ? 's' : ''} no mês
+                </div>
+                <div className="mono tnum" style={{ fontSize: 14, fontWeight: 600, color: theme.colors.primary }}>
+                  Total: {fmtBRL(data.orders.reduce((s, o) => s + (o.editor_value || 0), 0), true)}
+                </div>
+              </div>
+            </div>
+            {data.orders.length > 0 ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+                <thead>
+                  <tr style={{ background: theme.colors.bgSecondary }}>
+                    {['Dia', 'Trabalhos entregues', 'Cliente', 'Valor editor', 'Status'].map((h, i) => (
+                      <th key={h} className="eyebrow" style={{
+                        padding: '10px 14px',
+                        textAlign: i === 3 ? 'right' : 'left',
+                        borderBottom: `1px solid ${theme.colors.border}`,
+                        width: i === 0 ? 100 : i === 3 ? 130 : i === 4 ? 120 : 'auto',
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const days = getDaysInMonth(month)
+                    const weekDays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+                    return days.map(dateStr => {
+                      const dayOrders = data.orders.filter(o => {
+                        const oDate = (o.updated_at || o.created_at || '').substring(0, 10)
+                        return oDate === dateStr
+                      })
+                      if (dayOrders.length === 0) return null
+                      const dayNum = parseInt(dateStr.split('-')[2])
+                      const dow = weekDays[new Date(dateStr + 'T12:00:00').getDay()]
+                      return dayOrders.map((o, oi) => (
+                        <tr key={`${dateStr}-${o.id}`} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                          {oi === 0 && (
+                            <td rowSpan={dayOrders.length} style={{ padding: '10px 14px', verticalAlign: 'top' }}>
+                              <span className="mono" style={{ fontSize: 13, color: theme.colors.text }}>{String(dayNum).padStart(2, '0')}</span>
+                              <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.textFaint }}>{dow}</span>
+                            </td>
+                          )}
+                          <td style={{ padding: '10px 14px' }}>
+                            <span style={{
+                              padding: '2px 8px', background: theme.colors.primaryMuted,
+                              borderRadius: 4, fontSize: 11.5, color: theme.colors.primary, fontWeight: 500,
+                            }}>{o.title}</span>
+                          </td>
+                          <td style={{ padding: '10px 14px', fontSize: 12, color: theme.colors.textMuted }}>{o.client_name}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right' }} className="mono tnum">
+                            {o.editor_value > 0
+                              ? <span style={{ color: theme.colors.primary, fontWeight: 600 }}>{fmtBRL(o.editor_value, true)}</span>
+                              : <span style={{ color: theme.colors.textFaint }}>—</span>}
+                          </td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <Badge color={
+                              o.batch_status === 'paid' ? 'mint' : o.batch_id ? 'gold' : o.column_name?.toLowerCase().includes('finaliz') ? 'blue' : 'default'
+                            }>
+                              {o.batch_status === 'paid' ? 'Pago' : o.batch_id ? 'Em lote' : o.column_name || '—'}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))
+                    })
+                  })()}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: theme.colors.bgSecondary }}>
+                    <td style={{ padding: '12px 14px' }} className="eyebrow">total</td>
+                    <td style={{ padding: '12px 14px', fontSize: 12, color: theme.colors.textMuted }}>
+                      {data.orders.length} trabalho{data.orders.length !== 1 ? 's' : ''}
+                    </td>
+                    <td style={{ padding: '12px 14px' }}></td>
+                    <td style={{ padding: '12px 14px', textAlign: 'right', color: theme.colors.primary, fontWeight: 600 }} className="mono tnum">
+                      {fmtBRL(data.orders.reduce((s, o) => s + (o.editor_value || 0), 0), true)}
+                    </td>
+                    <td style={{ padding: '12px 14px' }}></td>
+                  </tr>
+                </tfoot>
+              </table>
+            ) : (
+              <div style={{ padding: 32, textAlign: 'center', color: theme.colors.textMuted, fontSize: 13 }}>
+                Nenhum trabalho registrado neste mês
+              </div>
+            )}
+          </div>
+
           {/* Unpaid */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 className="display" style={{ fontSize: 17, color: theme.colors.text, margin: 0 }}>

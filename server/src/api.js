@@ -1408,7 +1408,9 @@ router.get('/financial/editor-sheet/:editorId', authMiddleware, requireRole('ges
   const editor = get('SELECT * FROM users WHERE id = ? AND company_id = ?', [editorId, cid])
   if (!editor) return res.status(404).json({ error: 'Editor não encontrado' })
 
-  // Orders for this editor in this month
+  // Orders for this editor in this month (use updated_at OR created_at to capture both
+  // orders completed this month and orders created this month — prevents orders from
+  // "disappearing" when editor_value is edited later changing updated_at)
   const orders = all(`
     SELECT o.*, c.name as client_name, kc.name as column_name,
       (SELECT ci.status FROM client_invoice_items cii JOIN client_invoices ci ON ci.id = cii.invoice_id WHERE cii.order_id = o.id LIMIT 1) as client_paid,
@@ -1418,16 +1420,19 @@ router.get('/financial/editor-sheet/:editorId', authMiddleware, requireRole('ges
     LEFT JOIN clients c ON c.id = o.client_id
     LEFT JOIN kanban_columns kc ON kc.id = o.column_id
     WHERE o.editor_id = ? AND o.company_id = ?
-    AND DATE(o.updated_at) BETWEEN ? AND ?
-    ORDER BY o.updated_at ASC
-  `, [editorId, cid, startDate, endDate])
+    AND (DATE(o.updated_at) BETWEEN ? AND ? OR DATE(o.created_at) BETWEEN ? AND ?)
+    ORDER BY COALESCE(o.updated_at, o.created_at) ASC
+  `, [editorId, cid, startDate, endDate, startDate, endDate])
 
   // Unpaid orders for this editor (all time - for batch creation)
+  // Include orders with editor_value > 0 OR any order assigned to this editor in a
+  // finalized column (gestor may have set value but it shows as 0 due to default)
   const unpaid = all(`
-    SELECT o.*, c.name as client_name,
+    SELECT o.*, c.name as client_name, kc.name as column_name,
       (SELECT ci.status FROM client_invoice_items cii JOIN client_invoices ci ON ci.id = cii.invoice_id WHERE cii.order_id = o.id LIMIT 1) as client_paid
     FROM orders o
     LEFT JOIN clients c ON c.id = o.client_id
+    LEFT JOIN kanban_columns kc ON kc.id = o.column_id
     WHERE o.editor_id = ? AND o.company_id = ? AND o.editor_value > 0
     AND o.id NOT IN (SELECT order_id FROM editor_payment_items)
     ORDER BY o.updated_at DESC
