@@ -1276,7 +1276,7 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
     ORDER BY total_value DESC
   `, [cid, cid, cid, startDate, endDate, cid])
 
-  // Per-editor summary
+  // Per-editor summary (includes both direct editors AND team membership editors)
   const perEditor = all(`
     SELECT u.id as editor_id, u.name as editor_name,
       COUNT(o.id) as total_orders,
@@ -1290,11 +1290,12 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
     FROM users u
     LEFT JOIN orders o ON o.editor_id = u.id AND o.company_id = ?
       AND DATE(o.updated_at) BETWEEN ? AND ?
-    WHERE u.company_id = ? AND u.role = 'editor' AND u.active = 1
+    WHERE (u.company_id = ? OR u.id IN (SELECT user_id FROM team_memberships WHERE company_id = ? AND status = 'active'))
+      AND u.role = 'editor' AND u.active = 1
     GROUP BY u.id
     HAVING total_orders > 0
     ORDER BY total_value DESC
-  `, [cid, cid, cid, startDate, endDate, cid])
+  `, [cid, cid, cid, startDate, endDate, cid, cid])
 
   // Totals
   const totals = get(`
@@ -1405,7 +1406,15 @@ router.get('/financial/editor-sheet/:editorId', authMiddleware, requireRole('ges
   const startDate = `${month}-01`
   const endDate = `${month}-31`
 
-  const editor = get('SELECT * FROM users WHERE id = ? AND company_id = ?', [editorId, cid])
+  // Editor can be a direct member (company_id match) or a team membership member
+  let editor = get('SELECT * FROM users WHERE id = ? AND company_id = ?', [editorId, cid])
+  if (!editor) {
+    // Check team_memberships for shared editors from other companies
+    const membership = get('SELECT tm.*, u.name, u.email, u.role, u.phone, u.specialty, u.default_rate, u.avatar FROM team_memberships tm JOIN users u ON u.id = tm.user_id WHERE tm.user_id = ? AND tm.company_id = ? AND tm.status = ?', [editorId, cid, 'active'])
+    if (membership) {
+      editor = { id: membership.user_id, name: membership.name, email: membership.email, role: membership.role, phone: membership.phone, specialty: membership.specialty, default_rate: membership.default_rate, avatar: membership.avatar, company_id: cid }
+    }
+  }
   if (!editor) return res.status(404).json({ error: 'Editor não encontrado' })
 
   // Orders for this editor in this month (use updated_at OR created_at to capture both
