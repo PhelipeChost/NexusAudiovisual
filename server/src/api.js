@@ -7,7 +7,7 @@ import { run, get, all, createDefaultColumns } from './db.js'
 import { generateToken, authMiddleware, requireRole, requireActiveSubscription } from './auth.js'
 import { createRequire } from 'module'
 const require = createRequire(import.meta.url)
-const { validateContract } = require('./contract-validator.js')
+const { validateContract } = require('./contract-validator.cjs')
 
 // Multer config for PDF uploads (max 20MB, memory storage)
 const upload = multer({
