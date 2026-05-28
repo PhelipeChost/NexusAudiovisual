@@ -1,9 +1,23 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
+import multer from 'multer'
 import { MercadoPagoConfig, Preference, Payment as MPPayment } from 'mercadopago'
 import { run, get, all, createDefaultColumns } from './db.js'
 import { generateToken, authMiddleware, requireRole, requireActiveSubscription } from './auth.js'
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const { validateContract } = require('./contract-validator.js')
+
+// Multer config for PDF uploads (max 20MB, memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true)
+    else cb(new Error('Apenas arquivos PDF são aceitos'))
+  },
+})
 
 const router = Router()
 
@@ -3827,6 +3841,59 @@ router.post('/payment/pix', authMiddleware, async (req, res) => {
     console.error('PIX preference error:', err)
     res.status(500).json({ error: 'Erro ao gerar PIX: ' + (err.message || 'erro desconhecido') })
   }
+})
+
+// ============ CONTRACT VALIDATION ============
+
+// Upload and validate a signed PDF
+router.post('/contracts/validate', authMiddleware, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Arquivo PDF obrigatório' })
+
+    const report = await validateContract(req.file.buffer)
+
+    // Save validation to history
+    const result = run(
+      'INSERT INTO contract_validations (company_id, user_id, filename, file_size, status, report, signature_count, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [req.user.company_id, req.user.id, req.file.originalname, req.file.size,
+        report.status, JSON.stringify(report), report.signatureCount, report.confidence]
+    )
+
+    run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.user.company_id, req.user.id, 'validated', 'contract', result.lastInsertRowid,
+        `Validação de contrato: ${req.file.originalname} — ${report.status} (${report.confidence}%)`])
+
+    res.json({ id: Number(result.lastInsertRowid), ...report })
+  } catch (err) {
+    console.error('Contract validation error:', err)
+    res.status(500).json({ error: 'Erro na validação: ' + err.message })
+  }
+})
+
+// Get validation history
+router.get('/contracts/validations', authMiddleware, (req, res) => {
+  const validations = all(
+    `SELECT cv.id, cv.filename, cv.file_size, cv.status, cv.signature_count, cv.confidence, cv.created_at,
+       u.name as validated_by
+     FROM contract_validations cv
+     JOIN users u ON u.id = cv.user_id
+     WHERE cv.company_id = ?
+     ORDER BY cv.created_at DESC
+     LIMIT 50`,
+    [req.user.company_id]
+  )
+  res.json(validations)
+})
+
+// Get single validation report
+router.get('/contracts/validations/:id', authMiddleware, (req, res) => {
+  const v = get(
+    'SELECT * FROM contract_validations WHERE id = ? AND company_id = ?',
+    [req.params.id, req.user.company_id]
+  )
+  if (!v) return res.status(404).json({ error: 'Validação não encontrada' })
+  v.report = JSON.parse(v.report || '{}')
+  res.json(v)
 })
 
 export default router

@@ -103,6 +103,19 @@ const api = {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
     }).then(r => r.json()),
     govbrAvailable: (token) => fetch(`${BASE_URL}/contracts/sign/${token}/govbr-available`).then(r => r.json()),
+    // Validation
+    validate: (file) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      const token = localStorage.getItem('nexus_token')
+      return fetch(`${BASE_URL}/contracts/validate`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      }).then(r => r.json())
+    },
+    getValidations: () => request('/contracts/validations'),
+    getValidation: (id) => request(`/contracts/validations/${id}`),
   },
 
   lookup: {

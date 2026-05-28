@@ -302,6 +302,25 @@ async function initDb() {
     )
   `)
 
+  // ============ CONTRACT VALIDATIONS ============
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS contract_validations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      file_size INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending',
+      report TEXT,
+      signature_count INTEGER DEFAULT 0,
+      confidence INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `)
+
   // ============ CLIENT STANDALONE ENTRIES (lançamentos avulsos para clientes) ============
 
   db.run(`
