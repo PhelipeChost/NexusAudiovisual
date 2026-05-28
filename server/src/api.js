@@ -276,9 +276,12 @@ router.get('/client/projects', authMiddleware, requireRole('cliente'), (req, res
   if (!client) return res.status(404).json({ error: 'Cliente não vinculado' })
 
   const orders = all(
-    `SELECT o.*, u.name as editor_name, kc.name as column_name, kc.color as column_color
+    `SELECT o.id, o.title, o.description, o.briefing, o.drive_links, o.priority,
+       o.due_date, o.value, o.approved, o.delivery_url, o.delivery_notes,
+       o.video_type, o.duration, o.format, o.created_at, o.updated_at,
+       o.client_id, o.column_id, o.company_id,
+       kc.name as column_name, kc.color as column_color
      FROM orders o
-     LEFT JOIN users u ON u.id = o.editor_id
      LEFT JOIN kanban_columns kc ON kc.id = o.column_id
      WHERE o.client_id = ?
      ORDER BY o.updated_at DESC`,
