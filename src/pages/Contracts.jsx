@@ -4,7 +4,7 @@ import api from '../api'
 import theme from '../styles/theme'
 import Modal from '../components/Modal'
 import {
-  Icon, Spinner, Field,
+  Icon, Spinner, Field, Badge,
   inputStyle, btnPrimary, btnGhost, btnDanger, btnSoft,
   panelStyle, fmtBRL,
 } from '../components/ui'
@@ -71,6 +71,7 @@ export default function Contracts() {
   const [signEmail, setSignEmail] = useState('')
   const [signName, setSignName] = useState('')
   const [signSending, setSignSending] = useState(false)
+  const [validateModal, setValidateModal] = useState(null) // contract to validate PDF for
 
   useEffect(() => { load() }, [])
 
@@ -225,6 +226,7 @@ export default function Contracts() {
             onDelete={() => handleDelete(detailContract.id)}
             onPreview={() => { setPreviewContract(detailContract); setDetailContract(null) }}
             onSendSignature={(c) => { setSignModal(c); setSignEmail(''); setSignName(c.contratante_nome || ''); setDetailContract(null) }}
+            onValidate={() => { setValidateModal(detailContract); setDetailContract(null) }}
           />
         )}
       </Modal>
@@ -271,6 +273,13 @@ export default function Contracts() {
               O assinante precisará confirmar com código OTP enviado por email. A assinatura registra IP, data/hora, hash do documento e geolocalização.
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Validate PDF modal */}
+      <Modal open={!!validateModal} onClose={() => setValidateModal(null)} title="Validar PDF assinado" width={740}>
+        {validateModal && (
+          <ContractValidatePanel contract={validateModal} onClose={() => setValidateModal(null)} />
         )}
       </Modal>
     </div>
@@ -921,7 +930,7 @@ function PartySection({ label, color, prefix, form, setForm, cnpjLoading, setCnp
 /* ============================================================
    ContractDetail — summary view with actions
    ============================================================ */
-function ContractDetail({ contract, loading, onEdit, onDelete, onPreview, onSendSignature }) {
+function ContractDetail({ contract, loading, onEdit, onDelete, onPreview, onSendSignature, onValidate }) {
   if (loading) return <Spinner />
 
   const clauses = contract.clauses || []
@@ -1065,6 +1074,9 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview, onSend
             <Icon name="link" size={13} /> Enviar para assinatura
           </button>
         )}
+        <button onClick={onValidate} style={{ ...btnSoft, background: 'rgba(127,219,255,0.10)', color: theme.colors.primary, borderColor: theme.colors.primary }}>
+          <Icon name="check" size={13} /> Validar PDF assinado
+        </button>
         <button onClick={onEdit} style={btnSoft}>
           <Icon name="edit" size={13} /> Editar
         </button>
@@ -1298,6 +1310,287 @@ function ContractDocPreview({ contract, onClose }) {
         </button>
         <button onClick={onClose} style={btnGhost}>Fechar</button>
       </div>
+    </div>
+  )
+}
+
+/* ============================================================
+   ContractValidatePanel — upload + validate PDF inside contract modal
+   ============================================================ */
+const VAL_STATUS = {
+  valid: { label: 'Valido', color: 'mint', icon: 'check' },
+  partially_valid: { label: 'Parcialmente valido', color: 'gold', icon: 'alert' },
+  invalid: { label: 'Invalido', color: 'rose', icon: 'x' },
+  error: { label: 'Erro', color: 'rose', icon: 'x' },
+  pending: { label: 'Pendente', color: 'default', icon: 'clock' },
+}
+
+const OBS_ICON = {
+  success: { icon: 'check', color: theme.colors.mint },
+  warning: { icon: 'alert', color: theme.colors.warm },
+  error: { icon: 'x', color: theme.colors.danger },
+  info: { icon: 'info', color: theme.colors.primary },
+}
+
+function ContractValidatePanel({ contract, onClose }) {
+  const [file, setFile] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [report, setReport] = useState(null)
+  const fileRef = useRef(null)
+
+  function handleDrop(e) {
+    e.preventDefault()
+    setDragging(false)
+    const f = e.dataTransfer.files[0]
+    if (f && f.type === 'application/pdf') { setFile(f); setReport(null) }
+  }
+
+  function handleFileSelect(e) {
+    const f = e.target.files[0]
+    if (f) { setFile(f); setReport(null) }
+  }
+
+  async function handleValidate() {
+    if (!file) return
+    setValidating(true)
+    setReport(null)
+    try {
+      const result = await api.contracts.validate(file)
+      setReport(result)
+    } catch (err) {
+      setReport({ status: 'error', observations: [{ type: 'error', message: err.message }] })
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Contract reference */}
+      <div style={{ padding: '10px 14px', background: theme.colors.bgSecondary, borderRadius: 8, border: `1px solid ${theme.colors.border}` }}>
+        <div className="eyebrow" style={{ marginBottom: 4 }}>contrato vinculado</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text }}>{contract.title}</div>
+        {contract.client_name && <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 2 }}>{contract.client_name}</div>}
+      </div>
+
+      {/* Upload area */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        onClick={() => fileRef.current?.click()}
+        style={{
+          padding: 36, textAlign: 'center', cursor: 'pointer',
+          border: `2px dashed ${dragging ? theme.colors.primary : theme.colors.border}`,
+          background: dragging ? theme.colors.primaryMuted : theme.colors.bgSecondary,
+          borderRadius: 14, transition: 'all 0.2s',
+        }}
+      >
+        <input ref={fileRef} type="file" accept=".pdf" onChange={handleFileSelect} style={{ display: 'none' }} />
+        <div style={{ marginBottom: 8 }}>
+          <Icon name="upload" size={28} color={file ? theme.colors.mint : theme.colors.textMuted} />
+        </div>
+        {file ? (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text, marginBottom: 4 }}>{file.name}</div>
+            <div style={{ fontSize: 12, color: theme.colors.textMuted }}>{(file.size / 1024).toFixed(0)} KB — Clique para trocar</div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, color: theme.colors.text, marginBottom: 4 }}>Arraste o PDF assinado aqui</div>
+            <div style={{ fontSize: 12, color: theme.colors.textMuted }}>ou clique para selecionar — PDF com assinatura digital Gov.br / ICP-Brasil</div>
+          </>
+        )}
+      </div>
+
+      {file && !validating && !report && (
+        <button onClick={handleValidate} style={{ ...btnPrimary, alignSelf: 'center', padding: '10px 28px', fontSize: 14 }}>
+          Validar assinatura
+        </button>
+      )}
+
+      {validating && (
+        <div style={{ padding: 36, textAlign: 'center' }}>
+          <Spinner />
+          <div style={{ marginTop: 14, fontSize: 13, color: theme.colors.textMuted }}>Analisando assinaturas digitais...</div>
+        </div>
+      )}
+
+      {report && <ValidationReport report={report} />}
+
+      {report && (
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: `1px solid ${theme.colors.border}`, paddingTop: 12 }}>
+          <button onClick={() => { setFile(null); setReport(null) }} style={btnSoft}>
+            Nova validacao
+          </button>
+          <button onClick={onClose} style={btnGhost}>Fechar</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ============================================================
+   ValidationReport — displays validation results
+   ============================================================ */
+function ValidationReport({ report }) {
+  const st = VAL_STATUS[report.status] || VAL_STATUS.pending
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Status hero */}
+      <div style={{
+        overflow: 'hidden', borderRadius: 12,
+        border: `1px solid ${
+          report.status === 'valid' ? theme.colors.mint + '44' :
+          report.status === 'partially_valid' ? theme.colors.warm + '44' :
+          theme.colors.danger + '44'
+        }`,
+      }}>
+        <div style={{
+          padding: '20px 24px', display: 'flex', alignItems: 'center', gap: 16,
+          background: report.status === 'valid' ? 'rgba(0,210,150,0.05)' :
+            report.status === 'partially_valid' ? 'rgba(255,183,77,0.05)' : 'rgba(255,100,100,0.05)',
+        }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: report.status === 'valid' ? 'rgba(0,210,150,0.15)' :
+              report.status === 'partially_valid' ? 'rgba(255,183,77,0.15)' : 'rgba(255,100,100,0.15)',
+          }}>
+            <Icon name={st.icon} size={22} color={
+              report.status === 'valid' ? theme.colors.mint :
+              report.status === 'partially_valid' ? theme.colors.warm : theme.colors.danger
+            } />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div className="display" style={{ fontSize: 20, color: theme.colors.text }}>Contrato {st.label}</div>
+            {report.title && <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 2 }}>{report.title}</div>}
+          </div>
+          <ConfidenceBar value={report.confidence} />
+        </div>
+
+        {/* Quick stats */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', borderTop: `1px solid ${theme.colors.border}` }}>
+          {[
+            { k: 'Assinaturas', v: report.signatureCount || 0 },
+            { k: 'Signatarios', v: report.signers?.length || 0 },
+            { k: 'Datas', v: report.dates?.length || 0 },
+            { k: 'Paginas', v: report.pageCount || '—' },
+          ].map((m, i) => (
+            <div key={i} style={{ padding: '12px 16px', borderRight: i < 3 ? `1px solid ${theme.colors.border}` : 'none' }}>
+              <div className="eyebrow" style={{ marginBottom: 3 }}>{m.k}</div>
+              <div className="display tnum" style={{ fontSize: 18, color: theme.colors.text }}>{m.v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Signers */}
+      {report.signers && report.signers.length > 0 && (
+        <div style={{ borderRadius: 10, border: `1px solid ${theme.colors.border}`, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${theme.colors.border}`, background: theme.colors.bgSecondary }}>
+            <span className="display" style={{ fontSize: 14, color: theme.colors.text }}>Signatarios</span>
+          </div>
+          {report.signers.map((s, i) => (
+            <div key={i} style={{ padding: '14px 16px', borderBottom: i < report.signers.length - 1 ? `1px solid ${theme.colors.borderSoft}` : 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: theme.colors.primaryMuted, color: theme.colors.primary, fontSize: 12, fontWeight: 600,
+                  }}>
+                    {(s.name || '?')[0]}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: theme.colors.text }}>{s.name}</div>
+                    {s.organization && <div style={{ fontSize: 11, color: theme.colors.textMuted }}>{s.organization}</div>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <Badge color={s.signatureType === 'icp-brasil' || s.signatureType === 'govbr' ? 'mint' : s.signatureType === 'pades' ? 'blue' : 'default'}>
+                    {s.signatureType === 'icp-brasil' ? 'ICP-Brasil' : s.signatureType === 'govbr' ? 'Gov.br' : s.signatureType === 'pades' ? 'PAdES' : s.signatureType}
+                  </Badge>
+                  <Badge color={s.certificateValid ? 'mint' : 'rose'}>
+                    {s.certificateValid ? 'Valido' : 'Expirado'}
+                  </Badge>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                {[
+                  { k: 'Data', v: s.signDateFormatted || '—' },
+                  { k: 'Emissor', v: s.issuer || '—' },
+                  { k: 'Integridade', v: s.integrityValid ? 'Verificada' : 'Nao confirmada' },
+                ].map((f, j) => (
+                  <div key={j} style={{ padding: '6px 8px', background: theme.colors.bgSecondary, borderRadius: 6 }}>
+                    <div className="eyebrow" style={{ marginBottom: 2, fontSize: 9 }}>{f.k}</div>
+                    <div style={{ fontSize: 11.5, color: theme.colors.text }}>{f.v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Contract data */}
+      {(report.parties?.length > 0 || report.dates?.length > 0) && (
+        <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${theme.colors.border}` }}>
+          <span className="display" style={{ fontSize: 14, color: theme.colors.text }}>Dados extraidos do PDF</span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+            {report.parties?.length > 0 && (
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Partes</div>
+                {report.parties.map((p, i) => <div key={i} style={{ fontSize: 12, color: theme.colors.text }}>{p}</div>)}
+              </div>
+            )}
+            {report.dates?.length > 0 && (
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Datas</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {report.dates.map((d, i) => {
+                    const [y, m, day] = d.split('-')
+                    return <span key={i} style={{ padding: '2px 8px', background: theme.colors.bgSecondary, borderRadius: 4, fontSize: 11, color: theme.colors.text }}>{day}/{m}/{y}</span>
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Observations */}
+      {report.observations && report.observations.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {report.observations.map((obs, i) => {
+            const ic = OBS_ICON[obs.type] || OBS_ICON.info
+            return (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 12px', borderRadius: 8,
+                background: obs.type === 'error' ? 'rgba(255,100,100,0.06)' :
+                  obs.type === 'warning' ? 'rgba(255,183,77,0.06)' :
+                  obs.type === 'success' ? 'rgba(0,210,150,0.06)' : theme.colors.bgSecondary,
+              }}>
+                <Icon name={ic.icon} size={13} color={ic.color} style={{ marginTop: 2, flexShrink: 0 }} />
+                <span style={{ fontSize: 12.5, color: theme.colors.text, lineHeight: 1.5 }}>{obs.message}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConfidenceBar({ value }) {
+  const color = value >= 70 ? theme.colors.mint : value >= 40 ? theme.colors.warm : theme.colors.danger
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ width: 70, height: 5, background: theme.colors.bgSecondary, borderRadius: 3 }}>
+        <div style={{ width: `${value}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
+      </div>
+      <span className="mono tnum" style={{ fontSize: 13, fontWeight: 600, color }}>{value}%</span>
     </div>
   )
 }
