@@ -8,7 +8,7 @@ import VideoPlayer from '../components/VideoPlayer'
 import OrderComments from '../components/OrderComments'
 import {
   Icon, Avatar, Spinner, Badge, Field,
-  inputStyle, btnPrimary, btnGhost,
+  inputStyle, btnPrimary, btnGhost, btnSoft,
   panelStyle, PRIORITY, fmtBRL, daysUntil,
 } from '../components/ui'
 
@@ -28,6 +28,8 @@ export default function ClientDashboard() {
     title: '', description: '', briefing: '', video_type: '', duration: '', format: '', references: '',
   })
   const [submittingRequest, setSubmittingRequest] = useState(false)
+  const [entryProofModal, setEntryProofModal] = useState(null)
+  const [entryProofUrl, setEntryProofUrl] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -50,6 +52,16 @@ export default function ClientDashboard() {
       const d = await api.clientPortal.getFinancial()
       setFinancial(d)
     } catch (err) { console.error(err) } finally { setFinancialLoading(false) }
+  }
+
+  async function handlePayClientEntry(entryId) {
+    try {
+      await api.clientPortal.payEntry(entryId, { proof_url: entryProofUrl || null })
+      setEntryProofModal(null); setEntryProofUrl('')
+      // Refresh financial data
+      const d = await api.clientPortal.getFinancial()
+      setFinancial(d)
+    } catch (err) { alert(err.message) }
   }
 
   async function toggleInvoice(invoiceId) {
@@ -533,6 +545,48 @@ export default function ClientDashboard() {
                     )}
                   </div>
 
+                  {/* Standalone entries */}
+                  {(financial.clientEntries || []).length > 0 && (
+                    <div>
+                      <div className="eyebrow" style={{ marginBottom: 12 }}>Lançamentos</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {financial.clientEntries.map(e => (
+                          <div key={e.id} style={{ ...panelStyle, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13.5, fontWeight: 500, color: theme.colors.text }}>{e.description}</div>
+                              <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 3 }}>
+                                {e.entry_date ? new Date(e.entry_date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '—'}
+                              </div>
+                            </div>
+                            <span style={{
+                              padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                              background: e.status === 'paid' ? 'rgba(0,210,150,0.12)' : 'rgba(255,183,77,0.12)',
+                              color: e.status === 'paid' ? theme.colors.mint : theme.colors.warm,
+                              fontFamily: theme.fonts.mono, textTransform: 'uppercase', letterSpacing: '0.05em',
+                            }}>
+                              {e.status === 'paid' ? 'pago' : 'pendente'}
+                            </span>
+                            <span className="mono tnum" style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text }}>
+                              {fmtBRL(e.amount)}
+                            </span>
+                            {e.status === 'paid' && e.proof_url && (
+                              <a href={e.proof_url} target="_blank" rel="noreferrer"
+                                style={{ fontSize: 11, color: theme.colors.primary, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Icon name="link" size={11} stroke /> Comprovante
+                              </a>
+                            )}
+                            {e.status === 'pending' && (
+                              <button onClick={() => { setEntryProofModal(e); setEntryProofUrl('') }}
+                                style={{ padding: '5px 12px', background: 'rgba(0,210,150,0.12)', border: 'none', borderRadius: 6, color: theme.colors.mint, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                                Enviar comprovante
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Orders with payment status */}
                   <div>
                     <div className="eyebrow" style={{ marginBottom: 12 }}>Pedidos e pagamentos</div>
@@ -586,6 +640,32 @@ export default function ClientDashboard() {
           )}
         </>
       )}
+
+      {/* Entry proof modal */}
+      <Modal open={!!entryProofModal} onClose={() => { setEntryProofModal(null); setEntryProofUrl('') }} title="Enviar comprovante" width={460}>
+        {entryProofModal && (
+          <div>
+            <div style={{ marginBottom: 16 }}>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>Lançamento</div>
+              <div style={{ fontSize: 14, color: theme.colors.text }}>{entryProofModal.description}</div>
+              <div className="display tnum" style={{ fontSize: 24, color: theme.colors.mint, marginTop: 8 }}>
+                {fmtBRL(entryProofModal.amount)}
+              </div>
+            </div>
+            <Field label="Link do comprovante">
+              <input value={entryProofUrl} onChange={e => setEntryProofUrl(e.target.value)}
+                placeholder="Cole o link do comprovante de pagamento…" style={inputStyle} />
+            </Field>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button style={btnSoft} onClick={() => setEntryProofModal(null)}>Cancelar</button>
+              <button onClick={() => handlePayClientEntry(entryProofModal.id)}
+                style={{ ...btnPrimary, background: theme.colors.mint, color: theme.colors.bg }}>
+                Confirmar pagamento
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Order detail modal */}
       <Modal open={!!selectedOrder} onClose={() => setSelectedOrder(null)} width={560}>

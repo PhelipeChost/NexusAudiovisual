@@ -294,6 +294,11 @@ function ClientSheetTab({ month, lists }) {
   const [detailModal, setDetailModal] = useState(null)
   const [detailData, setDetailData] = useState(null)
   const [proofUrl, setProofUrl] = useState('')
+  const [showClientEntryModal, setShowClientEntryModal] = useState(false)
+  const [clientEntryForm, setClientEntryForm] = useState({ amount: '', description: '', entry_date: '' })
+  const [selectedEntries, setSelectedEntries] = useState([])
+  const [entryProofModal, setEntryProofModal] = useState(null)
+  const [entryProofUrl, setEntryProofUrl] = useState('')
   const debounceRef = useRef({})
 
   const loadSheet = useCallback(() => {
@@ -360,6 +365,33 @@ function ClientSheetTab({ month, lists }) {
   async function openInvoiceDetail(invoice) {
     setDetailModal(invoice)
     try { const d = await api.financial.getInvoiceItems(invoice.id); setDetailData(d) } catch (err) { console.error(err) }
+  }
+
+  async function handleCreateClientEntry() {
+    if (!clientEntryForm.amount || !clientEntryForm.description) return
+    try {
+      await api.financial.createClientEntry({
+        client_id: parseInt(clientId),
+        amount: parseFloat(clientEntryForm.amount),
+        description: clientEntryForm.description,
+        entry_date: clientEntryForm.entry_date || undefined,
+      })
+      setClientEntryForm({ amount: '', description: '', entry_date: '' })
+      setShowClientEntryModal(false)
+      loadSheet()
+    } catch (err) { alert(err.message) }
+  }
+
+  async function handleDeleteClientEntry(entryId) {
+    if (!confirm('Excluir este lançamento avulso?')) return
+    try { await api.financial.deleteClientEntry(entryId); loadSheet() } catch (err) { alert(err.message) }
+  }
+
+  async function handlePayClientEntry(entryId) {
+    try {
+      await api.financial.payClientEntry(entryId, { proof_url: entryProofUrl || null })
+      setEntryProofModal(null); setEntryProofUrl(''); loadSheet()
+    } catch (err) { alert(err.message) }
   }
 
   return (
@@ -575,8 +607,126 @@ function ClientSheetTab({ month, lists }) {
               Nenhuma nota criada
             </div>
           )}
+
+          {/* Client Standalone Entries */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 className="display" style={{ fontSize: 17, color: theme.colors.text, margin: 0 }}>
+              Lançamentos avulsos ({(data.allClientEntries || []).length})
+            </h3>
+            <button onClick={() => setShowClientEntryModal(true)} style={{ ...btnSoft, fontSize: 12, padding: '8px 14px' }}>
+              <Icon name="plus" size={12} /> Novo lançamento
+            </button>
+          </div>
+
+          {(data.allClientEntries || []).length > 0 ? (
+            <div style={{ ...panelStyle, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: theme.colors.bgSecondary }}>
+                    {['Descrição', 'Valor', 'Data', 'Status', 'Ações'].map(h => (
+                      <th key={h} className="eyebrow" style={{ padding: '10px 16px', textAlign: 'left', borderBottom: `1px solid ${theme.colors.border}` }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.allClientEntries || []).map(e => (
+                    <tr key={e.id} style={{ borderBottom: `1px solid ${theme.colors.borderSoft}` }}>
+                      <td style={{ padding: '10px 16px', fontSize: 13, color: theme.colors.text }}>{e.description}</td>
+                      <td style={{ padding: '10px 16px', fontWeight: 600 }} className="mono tnum">
+                        <span style={{ color: e.status === 'paid' ? theme.colors.mint : theme.colors.warm }}>{fmtBRL(e.amount, true)}</span>
+                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: theme.colors.textMuted }}>
+                        {e.entry_date ? new Date(e.entry_date + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                      </td>
+                      <td style={{ padding: '10px 16px' }}>
+                        {e.status === 'paid' ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Badge color="mint">Pago</Badge>
+                            {e.proof_url && (
+                              <a href={e.proof_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: theme.colors.primary, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <Icon name="link" size={10} stroke /> comprovante
+                              </a>
+                            )}
+                          </div>
+                        ) : (
+                          <Badge color="gold">Pendente</Badge>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 16px', display: 'flex', gap: 6 }}>
+                        {e.status === 'pending' && (
+                          <>
+                            <button onClick={() => { setEntryProofModal(e); setEntryProofUrl('') }}
+                              style={{ padding: '4px 10px', background: 'rgba(0,210,150,0.12)', border: 'none', borderRadius: 4, color: theme.colors.mint, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              Pagar
+                            </button>
+                            <button onClick={() => handleDeleteClientEntry(e.id)}
+                              style={{ padding: '4px 10px', background: theme.colors.dangerMuted, border: 'none', borderRadius: 4, color: theme.colors.danger, cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+                              Excluir
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ ...panelStyle, textAlign: 'center', padding: 24, color: theme.colors.textMuted, fontSize: 13 }}>
+              Nenhum lançamento avulso
+            </div>
+          )}
         </>
       )}
+
+      {/* Client entry creation modal */}
+      <Modal open={showClientEntryModal} onClose={() => setShowClientEntryModal(false)} title="Lançamento avulso" subtitle="cliente" width={460}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Field label="Valor (R$)">
+            <input type="number" step="0.01" min="0" value={clientEntryForm.amount}
+              onChange={e => setClientEntryForm(f => ({ ...f, amount: e.target.value }))} placeholder="0,00" style={inputStyle} />
+          </Field>
+          <Field label="Descrição / referência do contrato">
+            <textarea value={clientEntryForm.description}
+              onChange={e => setClientEntryForm(f => ({ ...f, description: e.target.value }))} rows={3}
+              placeholder="Ex: Mensalidade contrato maio/2026, Pacote 10 vídeos…" style={{ ...inputStyle, resize: 'vertical', fontFamily: theme.fonts.ui }} />
+          </Field>
+          <Field label="Data (opcional)">
+            <input type="date" value={clientEntryForm.entry_date}
+              onChange={e => setClientEntryForm(f => ({ ...f, entry_date: e.target.value }))} style={inputStyle} />
+          </Field>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button style={btnSoft} onClick={() => setShowClientEntryModal(false)}>Cancelar</button>
+          <button onClick={handleCreateClientEntry} style={btnPrimary} disabled={!clientEntryForm.amount || !clientEntryForm.description}>Registrar</button>
+        </div>
+      </Modal>
+
+      {/* Entry payment proof modal */}
+      <Modal open={!!entryProofModal} onClose={() => { setEntryProofModal(null); setEntryProofUrl('') }} title="Confirmar pagamento" subtitle="lançamento" width={460}>
+        {entryProofModal && (
+          <div>
+            <div style={{ marginBottom: 16 }}>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>Descrição</div>
+              <div style={{ fontSize: 14, color: theme.colors.text }}>{entryProofModal.description}</div>
+              <div className="display tnum" style={{ fontSize: 24, color: theme.colors.mint, marginTop: 8 }}>
+                {fmtBRL(entryProofModal.amount)}
+              </div>
+            </div>
+            <Field label="Comprovante (URL)">
+              <input value={entryProofUrl} onChange={e => setEntryProofUrl(e.target.value)}
+                placeholder="Link do comprovante de pagamento…" style={inputStyle} />
+            </Field>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button style={btnSoft} onClick={() => setEntryProofModal(null)}>Cancelar</button>
+              <button onClick={() => handlePayClientEntry(entryProofModal.id)}
+                style={{ ...btnPrimary, background: theme.colors.mint, color: theme.colors.bg }}>
+                Confirmar pagamento
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Create invoice modal */}
       <Modal open={showInvoiceModal} onClose={() => setShowInvoiceModal(false)} title="Gerar nota" subtitle="cobrança" width={520}>

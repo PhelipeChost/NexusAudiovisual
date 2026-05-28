@@ -72,6 +72,7 @@ const api = {
     requestChanges: (orderId, data) => request(`/client/orders/${orderId}/request-changes`, { method: 'POST', body: JSON.stringify(data) }),
     getFinancial: () => request('/client/financial'),
     getInvoiceItems: (id) => request(`/client/invoices/${id}/items`),
+    payEntry: (id, data) => request(`/client/entries/${id}/pay`, { method: 'PUT', body: JSON.stringify(data) }),
     createOrder: (data) => request('/client/orders', { method: 'POST', body: JSON.stringify(data) }),
     getContract: () => request('/client/contract'),
     sendContractOTP: () => request('/client/contract/send-otp', { method: 'POST' }),
@@ -161,6 +162,11 @@ const api = {
     // Editor standalone entries (lançamentos avulsos)
     createEditorEntry: (data) => request('/financial/editor-entries', { method: 'POST', body: JSON.stringify(data) }),
     deleteEditorEntry: (id) => request(`/financial/editor-entries/${id}`, { method: 'DELETE' }),
+
+    // Client standalone entries (lançamentos avulsos)
+    createClientEntry: (data) => request('/financial/client-entries', { method: 'POST', body: JSON.stringify(data) }),
+    deleteClientEntry: (id) => request(`/financial/client-entries/${id}`, { method: 'DELETE' }),
+    payClientEntry: (id, data) => request(`/financial/client-entries/${id}/pay`, { method: 'PUT', body: JSON.stringify(data) }),
 
     // Daily records
     upsertDailyRecord: (data) => request('/financial/daily-record', { method: 'PUT', body: JSON.stringify(data) }),

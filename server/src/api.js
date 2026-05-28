@@ -397,11 +397,21 @@ router.get('/client/financial', authMiddleware, requireRole('cliente'), (req, re
     ORDER BY o.updated_at DESC
   `, [client.id])
 
+  // Client standalone entries
+  const clientEntries = all(`
+    SELECT cse.id, cse.amount, cse.description, cse.entry_date, cse.status, cse.proof_url, cse.paid_at, cse.created_at
+    FROM client_standalone_entries cse
+    WHERE cse.client_id = ? AND cse.company_id = ?
+    ORDER BY cse.entry_date DESC
+  `, [client.id, req.user.company_id])
+
   const totalValue = orders.reduce((s, o) => s + (o.value || 0), 0)
   const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.total_amount || 0), 0)
+    + clientEntries.filter(e => e.status === 'paid').reduce((s, e) => s + (e.amount || 0), 0)
   const totalPending = invoices.filter(i => i.status === 'pending').reduce((s, i) => s + (i.total_amount || 0), 0)
+    + clientEntries.filter(e => e.status === 'pending').reduce((s, e) => s + (e.amount || 0), 0)
 
-  res.json({ invoices, orders, totalValue, totalPaid, totalPending })
+  res.json({ invoices, orders, clientEntries, totalValue, totalPaid, totalPending })
 })
 
 // Client get invoice items (read-only)
@@ -1396,7 +1406,32 @@ router.get('/financial/client-sheet/:clientId', authMiddleware, requireRole('ges
     ORDER BY ci.created_at DESC
   `, [clientId, cid])
 
-  res.json({ client, orders, dailyRecords, uninvoiced, invoices })
+  // Client standalone entries (all pending / not in invoice)
+  const unpaidClientEntries = all(`
+    SELECT cse.*, 'standalone' as entry_type
+    FROM client_standalone_entries cse
+    WHERE cse.client_id = ? AND cse.company_id = ? AND cse.status = 'pending' AND cse.invoice_id IS NULL
+    ORDER BY cse.entry_date DESC
+  `, [clientId, cid])
+
+  // Client standalone entries for this month (for spreadsheet)
+  const monthClientEntries = all(`
+    SELECT cse.*, 'standalone' as entry_type
+    FROM client_standalone_entries cse
+    WHERE cse.client_id = ? AND cse.company_id = ?
+    AND cse.entry_date BETWEEN ? AND ?
+    ORDER BY cse.entry_date ASC
+  `, [clientId, cid, startDate, endDate])
+
+  // All client standalone entries (for history)
+  const allClientEntries = all(`
+    SELECT cse.*, 'standalone' as entry_type
+    FROM client_standalone_entries cse
+    WHERE cse.client_id = ? AND cse.company_id = ?
+    ORDER BY cse.entry_date DESC
+  `, [clientId, cid])
+
+  res.json({ client, orders, dailyRecords, uninvoiced, invoices, unpaidClientEntries, monthClientEntries, allClientEntries })
 })
 
 // Editor spreadsheet (per-editor, per-day)
@@ -1551,6 +1586,101 @@ router.get('/financial/client-invoices/:id/items', authMiddleware, requireRole('
   `, [req.params.id])
   const invoice = get('SELECT ci.*, cl.name as client_name FROM client_invoices ci JOIN clients cl ON cl.id = ci.client_id WHERE ci.id = ?', [req.params.id])
   res.json({ invoice, items })
+})
+
+// ============ CLIENT STANDALONE ENTRIES ============
+
+// Create a client standalone entry (gestor)
+router.post('/financial/client-entries', authMiddleware, requireRole('gestor'), (req, res) => {
+  const { client_id, amount, description, entry_date } = req.body
+  if (!client_id || !amount || !description) {
+    return res.status(400).json({ error: 'Cliente, valor e descrição são obrigatórios' })
+  }
+
+  const parsedAmount = parseFloat(amount)
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Valor deve ser maior que zero' })
+  }
+
+  const client = get('SELECT * FROM clients WHERE id = ? AND company_id = ?', [client_id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente não encontrado' })
+
+  const result = run(
+    'INSERT INTO client_standalone_entries (company_id, client_id, amount, description, entry_date) VALUES (?, ?, ?, ?, ?)',
+    [req.user.company_id, client_id, parsedAmount, description, entry_date || new Date().toISOString().substring(0, 10)]
+  )
+
+  run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
+    [req.user.company_id, req.user.id, 'created', 'client_entry', result.lastInsertRowid,
+      `Lançamento avulso para ${client.name} - R$ ${parsedAmount.toFixed(2)}: ${description}`])
+
+  // Notify client user if linked
+  if (client.user_id) {
+    run('INSERT INTO notifications (company_id, user_id, type, title, message, reference_id, reference_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [req.user.company_id, client.user_id, 'financial', 'Novo lançamento registrado',
+        `R$ ${parsedAmount.toFixed(2)} — ${description}`, result.lastInsertRowid, 'client_entry'])
+  }
+
+  const entry = get('SELECT * FROM client_standalone_entries WHERE id = ?', [result.lastInsertRowid])
+  res.json(entry)
+})
+
+// Delete client standalone entry (only if pending and not in invoice)
+router.delete('/financial/client-entries/:id', authMiddleware, requireRole('gestor'), (req, res) => {
+  const entry = get(
+    "SELECT * FROM client_standalone_entries WHERE id = ? AND company_id = ? AND status = 'pending' AND invoice_id IS NULL",
+    [req.params.id, req.user.company_id]
+  )
+  if (!entry) return res.status(404).json({ error: 'Lançamento não encontrado ou já pago/faturado' })
+  run('DELETE FROM client_standalone_entries WHERE id = ?', [req.params.id])
+  res.json({ success: true })
+})
+
+// Pay client standalone entry (gestor attaches proof)
+router.put('/financial/client-entries/:id/pay', authMiddleware, requireRole('gestor'), (req, res) => {
+  const { proof_url } = req.body
+  const entry = get(
+    "SELECT * FROM client_standalone_entries WHERE id = ? AND company_id = ?",
+    [req.params.id, req.user.company_id]
+  )
+  if (!entry) return res.status(404).json({ error: 'Lançamento não encontrado' })
+
+  run(
+    "UPDATE client_standalone_entries SET status = 'paid', proof_url = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [proof_url || null, req.params.id]
+  )
+
+  // Notify client
+  const client = get('SELECT * FROM clients WHERE id = ?', [entry.client_id])
+  if (client && client.user_id) {
+    run('INSERT INTO notifications (company_id, user_id, type, title, message, reference_id, reference_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [req.user.company_id, client.user_id, 'financial', 'Pagamento confirmado',
+        `R$ ${entry.amount.toFixed(2)} — ${entry.description}`, req.params.id, 'client_entry'])
+  }
+
+  const updated = get('SELECT * FROM client_standalone_entries WHERE id = ?', [req.params.id])
+  res.json(updated)
+})
+
+// Client-side: attach proof to their own entry
+router.put('/client/entries/:id/pay', authMiddleware, requireRole('cliente'), (req, res) => {
+  const { proof_url } = req.body
+  const client = get('SELECT id FROM clients WHERE user_id = ? AND company_id = ?', [req.user.id, req.user.company_id])
+  if (!client) return res.status(404).json({ error: 'Cliente não vinculado' })
+
+  const entry = get(
+    'SELECT * FROM client_standalone_entries WHERE id = ? AND client_id = ? AND company_id = ?',
+    [req.params.id, client.id, req.user.company_id]
+  )
+  if (!entry) return res.status(404).json({ error: 'Lançamento não encontrado' })
+
+  run(
+    "UPDATE client_standalone_entries SET status = 'paid', proof_url = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?",
+    [proof_url || null, req.params.id]
+  )
+
+  const updated = get('SELECT * FROM client_standalone_entries WHERE id = ?', [req.params.id])
+  res.json(updated)
 })
 
 // Create editor payment batch (supports orders + standalone entries)

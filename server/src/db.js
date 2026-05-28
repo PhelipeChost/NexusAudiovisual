@@ -302,6 +302,27 @@ async function initDb() {
     )
   `)
 
+  // ============ CLIENT STANDALONE ENTRIES (lançamentos avulsos para clientes) ============
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS client_standalone_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      company_id INTEGER NOT NULL,
+      client_id INTEGER NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      description TEXT NOT NULL,
+      entry_date DATE DEFAULT (DATE('now')),
+      status TEXT DEFAULT 'pending',
+      proof_url TEXT,
+      paid_at DATETIME,
+      invoice_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (company_id) REFERENCES companies(id),
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (invoice_id) REFERENCES client_invoices(id) ON DELETE SET NULL
+    )
+  `)
+
   // ============ TEAM MEMBERSHIPS (multi-team editors) ============
 
   db.run(`
