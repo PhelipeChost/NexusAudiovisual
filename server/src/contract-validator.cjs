@@ -122,8 +122,15 @@ function extractSignaturesFromPDF(pdfBuffer) {
         pdfBuffer.slice(byteRange[2], byteRange[2] + byteRange[3]),
       ])
 
-      // Parse PKCS#7 / CMS structure
-      const p7Asn1 = forge.asn1.fromDer(sigBuffer.toString('binary'))
+      // Parse PKCS#7 / CMS structure (strict:false tolerates trailing padding bytes)
+      const derStr = sigBuffer.toString('binary')
+      let p7Asn1
+      try {
+        p7Asn1 = forge.asn1.fromDer(derStr, { strict: false })
+      } catch (derErr) {
+        // If strict:false still fails, try parsing with exact DER length
+        p7Asn1 = forge.asn1.fromDer(forge.util.createBuffer(derStr))
+      }
       const p7 = forge.pkcs7.messageFromAsn1(p7Asn1)
 
       // Extract certificates from the signature
@@ -549,15 +556,19 @@ async function validateContract(pdfBuffer) {
       console.log(`[validator] Text extracted: ${pdfText.length} chars, ${parsed.numpages} pages`)
     } catch (err) {
       console.log(`[validator] pdf-parse failed: ${err.message}`)
-      // Fallback: try to extract basic text via regex from PDF stream
+      // Fallback: try to extract readable text via regex from PDF streams
       try {
         const textChunks = []
-        const streamRegex = /\(([^)]{3,})\)/g
+        const streamRegex = /\(([^)]{4,200})\)/g
         const latin1 = pdfBuffer.toString('latin1')
         let tm
         while ((tm = streamRegex.exec(latin1)) !== null) {
           const decoded = tm[1].replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\\\/g, '\\')
-          if (/[a-zA-ZÀ-ú]{2,}/.test(decoded)) textChunks.push(decoded)
+          // Only keep chunks that are mostly readable text (>60% word chars), skip binary garbage
+          const wordChars = (decoded.match(/[a-zA-ZÀ-úà-ú0-9\s.,;:!?/-]/g) || []).length
+          if (wordChars > decoded.length * 0.6 && /[a-zA-ZÀ-ú]{3,}/.test(decoded)) {
+            textChunks.push(decoded)
+          }
         }
         if (textChunks.length > 0) {
           pdfText = textChunks.join(' ')
