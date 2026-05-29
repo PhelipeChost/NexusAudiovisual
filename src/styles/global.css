@@ -139,3 +139,89 @@ a { color: inherit; text-decoration: none; }
 }
 .nx-input:focus { border-color: var(--accent-line); background: var(--bg-1); }
 .nx-input::placeholder { color: var(--text-3); }
+
+/* ============================================================
+   RESPONSIVE — Mobile (≤768px)
+   ============================================================ */
+@media (max-width: 768px) {
+  /* Touch-friendly tap targets */
+  button, a, [role="button"] {
+    min-height: 36px;
+  }
+
+  /* Tables: horizontal scroll wrapper */
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+
+  /* Grid overrides — stack single column on mobile */
+  .grid-responsive {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* KPI panels — stack */
+  .kpi-grid {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .kpi-grid > * {
+    border-right: none !important;
+    border-bottom: 1px solid var(--line) !important;
+  }
+  .kpi-grid > *:last-child {
+    border-bottom: none !important;
+  }
+
+  /* Modal: already handled in Modal.jsx, but ensure backdrop full coverage */
+  .modal-backdrop {
+    padding: 0;
+  }
+  .modal {
+    border-radius: 16px 16px 0 0;
+    max-height: 92vh;
+  }
+
+  /* Cards: reduce padding */
+  .panel-mobile {
+    padding: 12px !important;
+  }
+
+  /* Hide desktop-only elements */
+  .desktop-only {
+    display: none !important;
+  }
+
+  /* Scroll hints */
+  .scroll-hint {
+    position: relative;
+  }
+  .scroll-hint::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 24px;
+    background: linear-gradient(to right, transparent, var(--bg));
+    pointer-events: none;
+  }
+}
+
+/* Show mobile-only elements */
+.mobile-only {
+  display: none !important;
+}
+@media (max-width: 768px) {
+  .mobile-only {
+    display: flex !important;
+  }
+}
+
+/* Safe area for iOS */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

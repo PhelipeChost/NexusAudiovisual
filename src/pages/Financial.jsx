@@ -8,6 +8,7 @@ import {
   inputStyle, btnPrimary, btnSoft, btnGhost, btnDanger,
   panelStyle, fmtBRL,
 } from '../components/ui'
+import useIsMobile from '../hooks/useIsMobile'
 
 const tabs = [
   { id: 'overview', label: 'Visão geral' },
@@ -47,6 +48,7 @@ function MonthPicker({ value, onChange }) {
 }
 
 export default function Financial() {
+  const isMobile = useIsMobile()
   const [tab, setTab] = useState('overview')
   const [month, setMonth] = useState(getMonthStr(new Date()))
   const [lists, setLists] = useState({ clients: [], editors: [] })
@@ -59,12 +61,13 @@ export default function Financial() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'space-between', gap: isMobile ? 10 : 16 }}>
         <div style={{
           display: 'flex', padding: 4,
           background: theme.colors.bgSecondary,
           border: `1px solid ${theme.colors.border}`,
           borderRadius: 10, gap: 2,
+          overflowX: isMobile ? 'auto' : 'visible',
         }}>
           {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
@@ -72,6 +75,7 @@ export default function Financial() {
               fontSize: 12.5, fontWeight: tab === t.id ? 500 : 400,
               color: tab === t.id ? theme.colors.text : theme.colors.textMuted,
               background: tab === t.id ? theme.colors.surfaceHover : 'transparent',
+              whiteSpace: 'nowrap',
             }}>
               {t.label}
             </button>
@@ -80,7 +84,7 @@ export default function Financial() {
         <MonthPicker value={month} onChange={setMonth} />
       </div>
 
-      {tab === 'overview' && <OverviewTab month={month} />}
+      {tab === 'overview' && <OverviewTab month={month} isMobile={isMobile} />}
       {tab === 'clients'  && <ClientSheetTab month={month} lists={lists} />}
       {tab === 'editors'  && <EditorSheetTab month={month} lists={lists} />}
     </div>
@@ -90,7 +94,8 @@ export default function Financial() {
 // ============================================================
 // OVERVIEW
 // ============================================================
-function OverviewTab({ month }) {
+function OverviewTab({ month, isMobile: isMobileProp }) {
+  const isMobile = isMobileProp ?? false
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -109,8 +114,8 @@ function OverviewTab({ month }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Hero KPIs */}
       <div style={{ ...panelStyle, padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr' }}>
-          <div style={{ padding: 32, borderRight: `1px solid ${theme.colors.border}`, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1fr 1fr' }}>
+          <div style={{ padding: isMobile ? 20 : 32, borderRight: isMobile ? 'none' : `1px solid ${theme.colors.border}`, borderBottom: isMobile ? `1px solid ${theme.colors.border}` : 'none', position: 'relative', overflow: 'hidden' }}>
             <div className="grid-bg" style={{ position: 'absolute', inset: 0, opacity: 0.4, pointerEvents: 'none' }} />
             <div style={{ position: 'relative' }}>
               <div className="eyebrow" style={{ marginBottom: 10 }}>lucro do mês</div>
@@ -129,7 +134,7 @@ function OverviewTab({ month }) {
             </div>
           </div>
 
-          <div style={{ padding: 24, borderRight: `1px solid ${theme.colors.border}`, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div style={{ padding: isMobile ? 16 : 24, borderRight: isMobile ? 'none' : `1px solid ${theme.colors.border}`, borderBottom: isMobile ? `1px solid ${theme.colors.border}` : 'none', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div>
               <div className="eyebrow" style={{ marginBottom: 8 }}>a receber</div>
               <div className="display tnum" style={{ fontSize: 28, color: theme.colors.gold }}>
@@ -153,7 +158,7 @@ function OverviewTab({ month }) {
             </div>
           </div>
 
-          <div style={{ padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div style={{ padding: isMobile ? 16 : 24, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div>
               <div className="eyebrow" style={{ marginBottom: 8 }}>a pagar editores</div>
               <div className="display tnum" style={{ fontSize: 28, color: theme.colors.warm }}>
@@ -179,7 +184,7 @@ function OverviewTab({ month }) {
         </div>
 
         <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+          display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
           borderTop: `1px solid ${theme.colors.border}`,
         }}>
           {[
@@ -199,7 +204,7 @@ function OverviewTab({ month }) {
       </div>
 
       {/* Two tables */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16 }}>
         <FinTable
           eyebrow="por cliente"
           title="Faturamento"

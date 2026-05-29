@@ -8,9 +8,11 @@ import {
   Icon, Avatar, Spinner, Field,
   inputStyle, btnPrimary, btnSoft, panelStyle, fmtBRL,
 } from '../components/ui'
+import useIsMobile from '../hooks/useIsMobile'
 
 export default function Clients() {
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const [clients, setClients] = useState([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -50,10 +52,10 @@ export default function Clients() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Header / toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'space-between', gap: isMobile ? 10 : 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
+            display: 'flex', alignItems: 'center', gap: 8, flex: 1,
             padding: '4px 12px 4px 4px',
             background: theme.colors.bgSecondary,
             border: `1px solid ${theme.colors.border}`,
@@ -66,33 +68,38 @@ export default function Clients() {
               placeholder="Buscar cliente…"
               style={{
                 background: 'transparent', border: 'none', outline: 'none',
-                padding: '8px 0', fontSize: 13, color: theme.colors.text, width: 220,
+                padding: '8px 0', fontSize: 13, color: theme.colors.text, width: isMobile ? '100%' : 220,
+                minWidth: 0,
               }}
             />
           </div>
-          <span style={{ fontSize: 12, color: theme.colors.textMuted }}>
-            {clients.length} cliente{clients.length !== 1 ? 's' : ''}
-          </span>
+          {!isMobile && (
+            <span style={{ fontSize: 12, color: theme.colors.textMuted }}>
+              {clients.length} cliente{clients.length !== 1 ? 's' : ''}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{
-            display: 'flex', padding: 2,
-            background: theme.colors.bgSecondary,
-            border: `1px solid ${theme.colors.border}`,
-            borderRadius: 8,
-          }}>
-            {[{ v: 'grid', l: 'Cards' }, { v: 'list', l: 'Tabela' }].map(opt => (
-              <button key={opt.v} onClick={() => setView(opt.v)}
-                style={{
-                  padding: '5px 12px', fontSize: 12, borderRadius: 6,
-                  color: view === opt.v ? theme.colors.text : theme.colors.textMuted,
-                  background: view === opt.v ? theme.colors.surfaceHover : 'transparent',
-                }}>
-                {opt.l}
-              </button>
-            ))}
-          </div>
-          <button style={btnPrimary} onClick={() => setShowModal(true)}>
+          {!isMobile && (
+            <div style={{
+              display: 'flex', padding: 2,
+              background: theme.colors.bgSecondary,
+              border: `1px solid ${theme.colors.border}`,
+              borderRadius: 8,
+            }}>
+              {[{ v: 'grid', l: 'Cards' }, { v: 'list', l: 'Tabela' }].map(opt => (
+                <button key={opt.v} onClick={() => setView(opt.v)}
+                  style={{
+                    padding: '5px 12px', fontSize: 12, borderRadius: 6,
+                    color: view === opt.v ? theme.colors.text : theme.colors.textMuted,
+                    background: view === opt.v ? theme.colors.surfaceHover : 'transparent',
+                  }}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+          )}
+          <button style={{ ...btnPrimary, ...(isMobile ? { flex: 1, justifyContent: 'center' } : {}) }} onClick={() => setShowModal(true)}>
             <Icon name="plus" size={14} />
             Novo cliente
           </button>
@@ -119,8 +126,8 @@ export default function Clients() {
             </button>
           )}
         </div>
-      ) : view === 'grid' ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(312px, 1fr))', gap: 14 }}>
+      ) : (isMobile || view === 'grid') ? (
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(312px, 1fr))', gap: isMobile ? 8 : 14 }}>
           {filtered.map(client => (
             <ClientCard key={client.id} client={client} onClick={() => navigate(`/dashboard/clients/${client.id}`)} />
           ))}
@@ -183,7 +190,7 @@ export default function Clients() {
               placeholder="Ex: Helena Vasques" style={inputStyle}
             />
           </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 12 }}>
             <Field label="Email">
               <input
                 type="email" value={form.email}

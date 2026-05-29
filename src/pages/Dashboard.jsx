@@ -7,6 +7,7 @@ import {
   Icon, Avatar, Sparkline, Spinner, Badge,
   fmtBRL, daysUntil, panelStyle, btnPrimary, btnSoft,
 } from '../components/ui'
+import useIsMobile from '../hooks/useIsMobile'
 
 const ACT_COLORS = {
   created: theme.colors.mint,
@@ -31,6 +32,7 @@ function actionVerb(a) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [paymentRequired, setPaymentRequired] = useState(false)
@@ -88,59 +90,57 @@ export default function Dashboard() {
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 16 : 28 }}>
       {/* Editorial intro */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 28, alignItems: 'end' }}>
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {weekday} · {dateStr} · semana {week}
-          </div>
-          <h2 className="display" style={{
-            fontSize: 44, lineHeight: 1.04, letterSpacing: '-0.02em',
-            maxWidth: 760, margin: 0, color: theme.colors.text,
-          }}>
-            {greeting}.
-            {stats.inProgress > 0 && (
-              <>
-                <span className="display-italic" style={{ color: theme.colors.textMuted }}>
-                  {' '}{stats.inProgress} pedido{stats.inProgress !== 1 ? 's' : ''} em curso
-                </span>
-                <span style={{ color: theme.colors.textMuted }}>
-                  {stats.overdue > 0 ? ',' : '.'}
-                </span>
-              </>
-            )}
-            {stats.overdue > 0 && (
-              <>
-                <span className="display-italic" style={{ color: theme.colors.textMuted }}>
-                  {' '}{stats.overdue} atrasado{stats.overdue !== 1 ? 's' : ''}
-                </span>
-                <span style={{ color: theme.colors.textMuted }}>.</span>
-              </>
-            )}
-          </h2>
+      <div>
+        <div className="eyebrow" style={{ marginBottom: isMobile ? 4 : 8 }}>
+          {weekday} · {dateStr} · semana {week}
         </div>
+        <h2 className="display" style={{
+          fontSize: isMobile ? 24 : 44, lineHeight: 1.1, letterSpacing: '-0.02em',
+          maxWidth: 760, margin: 0, color: theme.colors.text,
+        }}>
+          {greeting}.
+          {stats.inProgress > 0 && (
+            <>
+              <span className="display-italic" style={{ color: theme.colors.textMuted }}>
+                {' '}{stats.inProgress} pedido{stats.inProgress !== 1 ? 's' : ''} em curso
+              </span>
+              <span style={{ color: theme.colors.textMuted }}>
+                {stats.overdue > 0 ? ',' : '.'}
+              </span>
+            </>
+          )}
+          {stats.overdue > 0 && (
+            <>
+              <span className="display-italic" style={{ color: theme.colors.textMuted }}>
+                {' '}{stats.overdue} atrasado{stats.overdue !== 1 ? 's' : ''}
+              </span>
+              <span style={{ color: theme.colors.textMuted }}>.</span>
+            </>
+          )}
+        </h2>
       </div>
 
       {/* Hero metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 8 : 14 }}>
         {heroMetrics.map((m) => (
-          <div key={m.id} style={{ ...panelStyle, padding: 18 }}>
-            <div className="eyebrow" style={{ marginBottom: 18 }}>{m.label}</div>
+          <div key={m.id} style={{ ...panelStyle, padding: isMobile ? 12 : 18 }}>
+            <div className="eyebrow" style={{ marginBottom: isMobile ? 8 : 18, fontSize: isMobile ? 9 : 11 }}>{m.label}</div>
             <div className="display tnum" style={{
-              fontSize: 36, lineHeight: 1, letterSpacing: '-0.02em',
+              fontSize: isMobile ? 22 : 36, lineHeight: 1, letterSpacing: '-0.02em',
               color: theme.colors.text,
             }}>
               {m.currency ? (
                 <>
-                  <span style={{ fontSize: 18, color: theme.colors.textMuted, marginRight: 4 }}>R$</span>
+                  <span style={{ fontSize: isMobile ? 12 : 18, color: theme.colors.textMuted, marginRight: 4 }}>R$</span>
                   {Number(m.value).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </>
               ) : (
                 m.value
               )}
             </div>
-            <div style={{ height: 4, marginTop: 16, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ height: 4, marginTop: isMobile ? 8 : 16, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: '60%', background: m.color, opacity: 0.5 }} />
             </div>
           </div>
@@ -148,7 +148,7 @@ export default function Dashboard() {
       </div>
 
       {/* Two-column: pipeline + activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.6fr 1fr', gap: isMobile ? 16 : 20 }}>
         {/* Pipeline */}
         <div style={{ ...panelStyle, padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 22 }}>
@@ -179,7 +179,7 @@ export default function Dashboard() {
               </div>
 
               {/* Columns mini */}
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(ordersByColumn.length, 5)}, 1fr)`, gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(3, 1fr)' : `repeat(${Math.min(ordersByColumn.length, 5)}, 1fr)`, gap: isMobile ? 8 : 14 }}>
                 {ordersByColumn.slice(0, 5).map(c => (
                   <div key={c.column_name} style={{ borderTop: `2px solid ${c.color || theme.colors.primary}`, paddingTop: 12 }}>
                     <div className="eyebrow" style={{ fontSize: 10 }}>{c.column_name}</div>
@@ -207,7 +207,7 @@ export default function Dashboard() {
                 {editorPerformance.map(ed => {
                   const pct = ed.total_orders > 0 ? Math.round((ed.completed / ed.total_orders) * 100) : 0
                   return (
-                    <div key={ed.name} style={{ display: 'grid', gridTemplateColumns: '160px 1fr 100px', alignItems: 'center', gap: 16 }}>
+                    <div key={ed.name} style={{ display: 'grid', gridTemplateColumns: isMobile ? '100px 1fr 60px' : '160px 1fr 100px', alignItems: 'center', gap: isMobile ? 8 : 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <Avatar name={ed.name} size={26} />
                         <span style={{ fontSize: 12.5, color: theme.colors.textSecondary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

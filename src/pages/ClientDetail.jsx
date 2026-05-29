@@ -13,11 +13,13 @@ import {
   inputStyle, btnPrimary, btnSoft, btnGhost, btnDanger,
   panelStyle, PRIORITY, fmtBRL, daysUntil,
 } from '../components/ui'
+import useIsMobile from '../hooks/useIsMobile'
 
 export default function ClientDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const isMobile = useIsMobile()
   const [client, setClient] = useState(null)
   const [columns, setColumns] = useState([])
   const [orders, setOrders] = useState([])
@@ -207,29 +209,31 @@ export default function ClientDetail() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 64px - 24px - 48px)' }}>
       {/* Client header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18, gap: 16, flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', justifyContent: 'space-between', marginBottom: isMobile ? 12 : 18, gap: isMobile ? 10 : 16, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 18 }}>
           <button onClick={() => navigate('/dashboard/clients')} style={{
             ...btnSoft, padding: '7px 10px',
           }} title="Voltar">
             <Icon name="chevronLeft" size={14} />
           </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 14 }}>
             <div style={{ position: 'relative', cursor: 'pointer' }}
               onClick={() => logoInputRef.current?.click()}
               title="Trocar foto do cliente"
             >
-              <Avatar name={client.name} size={44} src={client.logo || undefined} />
-              <div style={{
-                position: 'absolute', inset: 0, borderRadius: '50%',
-                background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                opacity: 0, transition: 'opacity 0.15s',
-              }}
-                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                onMouseLeave={e => e.currentTarget.style.opacity = '0'}
-              >
-                <Icon name="edit" size={16} color="#fff" />
-              </div>
+              <Avatar name={client.name} size={isMobile ? 36 : 44} src={client.logo || undefined} />
+              {!isMobile && (
+                <div style={{
+                  position: 'absolute', inset: 0, borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  opacity: 0, transition: 'opacity 0.15s',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0'}
+                >
+                  <Icon name="edit" size={16} color="#fff" />
+                </div>
+              )}
               <input
                 ref={logoInputRef}
                 type="file"
@@ -247,11 +251,11 @@ export default function ClientDetail() {
               />
             </div>
             <div>
-              <div className="display" style={{ fontSize: 26, lineHeight: 1.1, color: theme.colors.text }}>
+              <div className="display" style={{ fontSize: isMobile ? 18 : 26, lineHeight: 1.1, color: theme.colors.text }}>
                 {client.name}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-                {client.contact_name && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 3 }}>
+                {client.contact_name && !isMobile && (
                   <>
                     <span style={{ fontSize: 12, color: theme.colors.textMuted }}>{client.contact_name}</span>
                     <span style={{ color: theme.colors.textFaint }}>·</span>
@@ -265,30 +269,34 @@ export default function ClientDetail() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={() => setShowDeleteClient(true)}
-            title="Excluir cliente"
-            style={{ ...btnSoft, color: theme.colors.danger, borderColor: 'rgba(244,115,131,0.3)', padding: '7px 10px' }}
-          >
-            <Icon name="trash" size={13} />
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const data = await api.clients.invite(id)
-                const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
-                const url = window.location.origin + base + data.url
-                setInviteLink(url)
-                navigator.clipboard.writeText(url).catch(() => {})
-              } catch (err) { alert(err.message) }
-            }}
-            style={btnGhost}
-          >
-            <Icon name="link" size={13} stroke />
-            {inviteLink ? 'Link copiado!' : 'Convidar cliente'}
-          </button>
-          <button onClick={() => setShowCreateModal(true)} style={btnPrimary}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!isMobile && (
+            <>
+              <button
+                onClick={() => setShowDeleteClient(true)}
+                title="Excluir cliente"
+                style={{ ...btnSoft, color: theme.colors.danger, borderColor: 'rgba(244,115,131,0.3)', padding: '7px 10px' }}
+              >
+                <Icon name="trash" size={13} />
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const data = await api.clients.invite(id)
+                    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+                    const url = window.location.origin + base + data.url
+                    setInviteLink(url)
+                    navigator.clipboard.writeText(url).catch(() => {})
+                  } catch (err) { alert(err.message) }
+                }}
+                style={btnGhost}
+              >
+                <Icon name="link" size={13} stroke />
+                {inviteLink ? 'Link copiado!' : 'Convidar cliente'}
+              </button>
+            </>
+          )}
+          <button onClick={() => setShowCreateModal(true)} style={{ ...btnPrimary, ...(isMobile ? { flex: 1, justifyContent: 'center' } : {}) }}>
             <Icon name="plus" size={14} />
             Novo pedido
           </button>
@@ -329,7 +337,7 @@ export default function ClientDetail() {
       </div>
 
       {/* Columns */}
-      <div style={{ display: 'flex', gap: 10, flex: 1, overflowX: 'auto', paddingBottom: 8 }}>
+      <div style={{ display: 'flex', gap: isMobile ? 8 : 10, flex: 1, overflowX: 'auto', paddingBottom: 8, WebkitOverflowScrolling: 'touch' }}>
         {columns.map(column => {
           const colOrders = getOrdersByColumn(column.id)
           const isOver = dragOverCol === column.id
@@ -339,7 +347,7 @@ export default function ClientDetail() {
               onDragLeave={() => setDragOverCol(null)}
               onDrop={e => handleDrop(e, column.id)}
               style={{
-                minWidth: 0, width: 0, flexShrink: 0, flex: '1 1 0',
+                minWidth: isMobile ? 260 : 0, width: isMobile ? 260 : 0, flexShrink: 0, flex: isMobile ? '0 0 260px' : '1 1 0',
                 background: isOver ? theme.colors.surfaceHover : theme.colors.bgSecondary,
                 border: `1px solid ${isOver ? column.color + '80' : theme.colors.border}`,
                 borderRadius: 12,
@@ -430,7 +438,7 @@ export default function ClientDetail() {
             <textarea value={form.briefing} onChange={e => setForm({ ...form, briefing: e.target.value })}
               placeholder="Instruções detalhadas para o editor…" rows={3} style={{ ...inputStyle, resize: 'vertical', fontFamily: theme.fonts.ui }} />
           </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: 12 }}>
             <Field label="Tipo de video">
               <select value={form.video_type} onChange={e => setForm({ ...form, video_type: e.target.value })}
                 style={{ ...inputStyle, cursor: 'pointer' }}>
@@ -472,7 +480,7 @@ export default function ClientDetail() {
             <input value={form.drive_links} onChange={e => setForm({ ...form, drive_links: e.target.value })}
               placeholder="https://drive.google.com/…" style={inputStyle} />
           </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: 12 }}>
             <Field label="Valor bruto (R$)">
               <input type="number" step="0.01" min="0"
                 value={form.value} onChange={e => setForm({ ...form, value: e.target.value })}

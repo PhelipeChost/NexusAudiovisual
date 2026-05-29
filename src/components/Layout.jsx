@@ -1,10 +1,11 @@
-// src/components/Layout.jsx — sidebar colapsavel + topbar + notificacoes
-import { useState, useEffect, useRef, Fragment, createContext, useContext } from 'react'
+// src/components/Layout.jsx — sidebar desktop + bottom-bar mobile + topbar + notificações
+import { useState, useEffect, useRef, createContext, useContext } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import theme from '../styles/theme'
 import { Icon, Avatar, LogoMark } from './ui'
+import useIsMobile from '../hooks/useIsMobile'
 
 // Context to share sidebar state with child pages
 export const SidebarContext = createContext({ collapsed: false })
@@ -24,6 +25,29 @@ const ALL_NAV_ITEMS = [
   { path: '/dashboard/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente'] },
 ]
 
+// Bottom bar: primary 4 items per role, rest go in "Mais" sheet
+const BOTTOM_BAR_ITEMS = {
+  gestor: [
+    { path: '/dashboard', label: 'Inicio', icon: 'dashboard', end: true },
+    { path: '/dashboard/clients', label: 'Clientes', icon: 'clients' },
+    { path: '/dashboard/financial', label: 'Financeiro', icon: 'financial' },
+    { path: '/dashboard/contracts', label: 'Contratos', icon: 'briefcase' },
+  ],
+  editor: [
+    { path: '/dashboard', label: 'Inicio', icon: 'dashboard', end: true },
+    { path: '/dashboard/board', label: 'Mapa', icon: 'film' },
+    { path: '/dashboard/editor-financial', label: 'Financeiro', icon: 'financial' },
+    { path: '/dashboard/editor-report', label: 'Relatorio', icon: 'briefcase' },
+  ],
+  cliente: [
+    { path: '/dashboard', label: 'Inicio', icon: 'dashboard', end: true },
+    { path: '/dashboard/settings', label: 'Config', icon: 'settings' },
+  ],
+  admin: [
+    { path: '/dashboard', label: 'Admin', icon: 'dashboard', end: true },
+  ],
+}
+
 const PAGE_TITLES = {
   '/dashboard': 'Panorama',
   '/dashboard/board': 'Mapa',
@@ -34,18 +58,24 @@ const PAGE_TITLES = {
   '/dashboard/reports': 'Relatorios',
   '/dashboard/admin': 'Administracao',
   '/dashboard/settings': 'Configuracoes',
+  '/dashboard/contracts': 'Contratos',
+  '/dashboard/editor-financial': 'Financeiro',
+  '/dashboard/editor-report': 'Relatorio',
 }
 
 const SIDEBAR_WIDTH = 232
 const SIDEBAR_COLLAPSED_WIDTH = 62
+const BOTTOM_BAR_HEIGHT = 64
 
 export default function Layout() {
   const { user, logout, setUser } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const [notifications, setNotifications] = useState({ notifications: [], unread: 0 })
   const [showNotifs, setShowNotifs] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const notifRef = useRef(null)
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('nexus_sidebar_collapsed') === '1' } catch { return false }
@@ -54,6 +84,8 @@ export default function Layout() {
   const [subscription, setSubscription] = useState(null)
 
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(user?.role))
+  const bottomItems = BOTTOM_BAR_ITEMS[user?.role] || BOTTOM_BAR_ITEMS.gestor
+  const moreItems = NAV_ITEMS.filter(n => !bottomItems.some(b => b.path === n.path))
 
   // Load subscription info for gestors
   useEffect(() => {
@@ -87,7 +119,7 @@ export default function Layout() {
         e.preventDefault()
         setSearchOpen(true)
       }
-      if (e.key === 'Escape') setSearchOpen(false)
+      if (e.key === 'Escape') { setSearchOpen(false); setMoreOpen(false) }
     }
     document.addEventListener('mousedown', onClick)
     document.addEventListener('keydown', onKey)
@@ -97,14 +129,276 @@ export default function Layout() {
     }
   }, [])
 
+  // Close "more" menu on navigation
+  useEffect(() => { setMoreOpen(false) }, [location.pathname])
+
   const currentTitle =
     PAGE_TITLES[location.pathname] ||
-    (location.pathname.startsWith('/clients/') ? 'Cliente' : '')
+    (location.pathname.startsWith('/dashboard/clients/') ? 'Cliente' : '')
 
   const sidebarW = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH
 
+  // ===== MOBILE LAYOUT =====
+  if (isMobile) {
+    return (
+      <SidebarContext.Provider value={{ collapsed: false, isMobile: true }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        {/* Mobile topbar */}
+        <header style={{
+          height: 52,
+          padding: '0 16px',
+          borderBottom: `1px solid ${theme.colors.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          background: 'rgba(10, 13, 19, 0.85)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 50,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {user?.company_logo ? (
+              <img src={user.company_logo} alt="" style={{ width: 26, height: 26, borderRadius: 6, objectFit: 'cover' }} />
+            ) : (
+              <LogoMark size={26} />
+            )}
+            <h1 className="display" style={{ fontSize: 17, lineHeight: 1, margin: 0, color: theme.colors.text }}>
+              {currentTitle}
+            </h1>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div ref={notifRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => {
+                  setShowNotifs(o => !o)
+                  if (!showNotifs && notifications.unread > 0) {
+                    api.notifications.readAll().then(() => setNotifications(n => ({ ...n, unread: 0 })))
+                  }
+                }}
+                style={{
+                  width: 36, height: 36, borderRadius: 8,
+                  background: showNotifs ? theme.colors.surfaceHover : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: theme.colors.textSecondary, position: 'relative',
+                }}
+              >
+                <Icon name="bell" size={18} stroke />
+                {notifications.unread > 0 && (
+                  <span style={{
+                    position: 'absolute', top: 6, right: 6,
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: theme.colors.warm,
+                    border: `2px solid ${theme.colors.bg}`,
+                  }} />
+                )}
+              </button>
+
+              {showNotifs && (
+                <div className="slide-up" style={{
+                  position: 'fixed', top: 52, left: 0, right: 0,
+                  maxHeight: 'calc(100vh - 52px - 64px)', overflowY: 'auto',
+                  background: theme.colors.bgSecondary,
+                  borderBottom: `1px solid ${theme.colors.borderLight}`,
+                  boxShadow: theme.shadows.lg,
+                  zIndex: 200,
+                }}>
+                  <div style={{ padding: '12px 16px', borderBottom: `1px solid ${theme.colors.border}` }}>
+                    <div className="display" style={{ fontSize: 16, color: theme.colors.text }}>Notificações</div>
+                  </div>
+                  {notifications.notifications.length === 0 ? (
+                    <div style={{ padding: 32, textAlign: 'center', color: theme.colors.textMuted, fontSize: 13 }}>
+                      Nenhuma notificação
+                    </div>
+                  ) : notifications.notifications.slice(0, 12).map(n => (
+                    <NotifItem key={n.id} n={n} setNotifications={setNotifications} setUser={setUser} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Avatar name={user?.name} size={30} src={user?.avatar || undefined} />
+          </div>
+        </header>
+
+        {/* Subscription banner */}
+        {subscription && user?.role === 'gestor' && (() => {
+          const s = subscription
+          if (s.status === 'trial') {
+            const daysLeft = s.trial_ends_at ? Math.max(0, Math.ceil((new Date(s.trial_ends_at) - new Date()) / 86400000)) : 0
+            return (
+              <div style={{
+                padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                background: 'rgba(127, 219, 255, 0.08)', borderBottom: `1px solid rgba(127, 219, 255, 0.15)`,
+                fontSize: 12,
+              }}>
+                <span style={{ color: theme.colors.primary }}>
+                  ⏱ Teste: <strong>{daysLeft} dias</strong>
+                </span>
+              </div>
+            )
+          }
+          if (s.status === 'past_due') {
+            return (
+              <div style={{
+                padding: '8px 16px', fontSize: 12, color: theme.colors.warning,
+                background: 'rgba(217, 183, 112, 0.08)', borderBottom: `1px solid rgba(217, 183, 112, 0.15)`,
+              }}>
+                ⚠ Pagamento pendente
+              </div>
+            )
+          }
+          return null
+        })()}
+
+        {/* Page content */}
+        <main style={{
+          flex: 1,
+          padding: '16px 12px',
+          paddingBottom: BOTTOM_BAR_HEIGHT + 16,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+        }}>
+          <Outlet />
+        </main>
+
+        {/* "Mais" sheet */}
+        {moreOpen && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, zIndex: 150,
+              background: 'rgba(5, 7, 12, 0.6)',
+              animation: 'fade-in 0.15s ease-out',
+            }}
+            onClick={() => setMoreOpen(false)}
+          >
+            <div
+              className="slide-up"
+              onClick={e => e.stopPropagation()}
+              style={{
+                position: 'absolute', bottom: BOTTOM_BAR_HEIGHT, left: 0, right: 0,
+                background: theme.colors.bgSecondary,
+                borderTop: `1px solid ${theme.colors.borderLight}`,
+                borderRadius: '16px 16px 0 0',
+                padding: '8px 0 12px',
+                maxHeight: '60vh',
+                overflowY: 'auto',
+              }}
+            >
+              {/* Handle bar */}
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 12px' }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: theme.colors.border }} />
+              </div>
+
+              {moreItems.map(item => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.end}
+                  onClick={() => setMoreOpen(false)}
+                  style={({ isActive }) => ({
+                    display: 'flex', alignItems: 'center', gap: 14,
+                    padding: '14px 24px',
+                    color: isActive ? theme.colors.primary : theme.colors.text,
+                    fontSize: 15, fontWeight: isActive ? 600 : 400,
+                    textDecoration: 'none',
+                    background: isActive ? theme.colors.primaryMuted : 'transparent',
+                  })}
+                >
+                  <Icon name={item.icon} size={20} stroke />
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+
+              {/* Logout */}
+              <button
+                onClick={() => { setMoreOpen(false); logout() }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 14,
+                  padding: '14px 24px', width: '100%',
+                  color: theme.colors.danger, fontSize: 15,
+                  borderTop: `1px solid ${theme.colors.border}`,
+                  marginTop: 4,
+                }}
+              >
+                <Icon name="logout" size={20} stroke />
+                <span>Sair</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Bottom navigation bar */}
+        <nav style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0,
+          height: BOTTOM_BAR_HEIGHT,
+          background: 'rgba(10, 13, 19, 0.92)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderTop: `1px solid ${theme.colors.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-around',
+          zIndex: 100,
+          paddingBottom: 'env(safe-area-inset-bottom, 0)',
+        }}>
+          {bottomItems.map(item => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              end={item.end}
+              style={({ isActive }) => ({
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 3, padding: '6px 0',
+                color: isActive ? theme.colors.primary : theme.colors.textMuted,
+                textDecoration: 'none',
+                minWidth: 56,
+                position: 'relative',
+              })}
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span style={{
+                      position: 'absolute', top: -1,
+                      width: 20, height: 2, borderRadius: 1,
+                      background: theme.colors.primary,
+                    }} />
+                  )}
+                  <Icon name={item.icon} size={22} stroke={!isActive} color={isActive ? theme.colors.primary : theme.colors.textMuted} />
+                  <span style={{ fontSize: 10, fontWeight: isActive ? 600 : 400 }}>{item.label}</span>
+                </>
+              )}
+            </NavLink>
+          ))}
+
+          {/* "Mais" button */}
+          {moreItems.length > 0 && (
+            <button
+              onClick={() => setMoreOpen(o => !o)}
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 3, padding: '6px 0',
+                color: moreOpen ? theme.colors.primary : theme.colors.textMuted,
+                minWidth: 56,
+              }}
+            >
+              <Icon name="more" size={22} stroke color={moreOpen ? theme.colors.primary : theme.colors.textMuted} />
+              <span style={{ fontSize: 10, fontWeight: moreOpen ? 600 : 400 }}>Mais</span>
+            </button>
+          )}
+        </nav>
+      </div>
+      </SidebarContext.Provider>
+    )
+  }
+
+  // ===== DESKTOP LAYOUT =====
   return (
-    <SidebarContext.Provider value={{ collapsed }}>
+    <SidebarContext.Provider value={{ collapsed, isMobile: false }}>
     <div style={{ display: 'flex', minHeight: '100vh' }}>
       {/* Sidebar */}
       <aside style={{
@@ -312,66 +606,7 @@ export default function Layout() {
                         Nenhuma notificacao
                       </div>
                     ) : notifications.notifications.slice(0, 12).map(n => (
-                      <div key={n.id} style={{
-                        padding: '12px 18px',
-                        borderBottom: `1px solid ${theme.colors.borderSoft}`,
-                        display: 'flex', gap: 12,
-                        background: n.read ? 'transparent' : 'rgba(127, 219, 255, 0.03)',
-                      }}>
-                        <div style={{
-                          width: 6, height: 6, borderRadius: '50%',
-                          background: n.read ? 'transparent' : n.type === 'team_invite' ? theme.colors.warm : theme.colors.primary,
-                          marginTop: 7, flexShrink: 0,
-                        }} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 500, color: theme.colors.text }}>{n.title}</div>
-                          <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 2 }}>{n.message}</div>
-                          {/* Team invite action buttons */}
-                          {n.type === 'team_invite' && n.reference_type === 'team_invite' && !n.read && (
-                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation()
-                                  try {
-                                    await api.team.acceptInvite(n.reference_id)
-                                    const d = await api.notifications.get()
-                                    setNotifications(d)
-                                    const me = await api.auth.me()
-                                    if (setUser) setUser(me)
-                                  } catch (err) { alert(err.message) }
-                                }}
-                                style={{
-                                  padding: '5px 14px', fontSize: 12, fontWeight: 600, borderRadius: 6,
-                                  background: theme.colors.primary, color: theme.colors.bg,
-                                  cursor: 'pointer', border: 'none',
-                                }}
-                              >
-                                Aceitar
-                              </button>
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation()
-                                  try {
-                                    await api.team.declineInvite(n.reference_id)
-                                    const d = await api.notifications.get()
-                                    setNotifications(d)
-                                  } catch (err) { alert(err.message) }
-                                }}
-                                style={{
-                                  padding: '5px 14px', fontSize: 12, fontWeight: 500, borderRadius: 6,
-                                  background: theme.colors.surfaceHover, color: theme.colors.textMuted,
-                                  cursor: 'pointer', border: `1px solid ${theme.colors.border}`,
-                                }}
-                              >
-                                Recusar
-                              </button>
-                            </div>
-                          )}
-                          <div className="eyebrow" style={{ marginTop: 6 }}>
-                            {new Date(n.created_at).toLocaleString('pt-BR')}
-                          </div>
-                        </div>
-                      </div>
+                      <NotifItem key={n.id} n={n} setNotifications={setNotifications} setUser={setUser} />
                     ))}
                   </div>
                 )}
@@ -448,6 +683,70 @@ export default function Layout() {
       )}
     </div>
     </SidebarContext.Provider>
+  )
+}
+
+// Extracted notification item for reuse
+function NotifItem({ n, setNotifications, setUser }) {
+  return (
+    <div style={{
+      padding: '12px 18px',
+      borderBottom: `1px solid ${theme.colors.borderSoft}`,
+      display: 'flex', gap: 12,
+      background: n.read ? 'transparent' : 'rgba(127, 219, 255, 0.03)',
+    }}>
+      <div style={{
+        width: 6, height: 6, borderRadius: '50%',
+        background: n.read ? 'transparent' : n.type === 'team_invite' ? theme.colors.warm : theme.colors.primary,
+        marginTop: 7, flexShrink: 0,
+      }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: theme.colors.text }}>{n.title}</div>
+        <div style={{ fontSize: 12, color: theme.colors.textMuted, marginTop: 2 }}>{n.message}</div>
+        {n.type === 'team_invite' && n.reference_type === 'team_invite' && !n.read && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              onClick={async (e) => {
+                e.stopPropagation()
+                try {
+                  await api.team.acceptInvite(n.reference_id)
+                  const d = await api.notifications.get()
+                  setNotifications(d)
+                  const me = await api.auth.me()
+                  if (setUser) setUser(me)
+                } catch (err) { alert(err.message) }
+              }}
+              style={{
+                padding: '5px 14px', fontSize: 12, fontWeight: 600, borderRadius: 6,
+                background: theme.colors.primary, color: theme.colors.bg,
+              }}
+            >
+              Aceitar
+            </button>
+            <button
+              onClick={async (e) => {
+                e.stopPropagation()
+                try {
+                  await api.team.declineInvite(n.reference_id)
+                  const d = await api.notifications.get()
+                  setNotifications(d)
+                } catch (err) { alert(err.message) }
+              }}
+              style={{
+                padding: '5px 14px', fontSize: 12, fontWeight: 500, borderRadius: 6,
+                background: theme.colors.surfaceHover, color: theme.colors.textMuted,
+                border: `1px solid ${theme.colors.border}`,
+              }}
+            >
+              Recusar
+            </button>
+          </div>
+        )}
+        <div className="eyebrow" style={{ marginTop: 6 }}>
+          {new Date(n.created_at).toLocaleString('pt-BR')}
+        </div>
+      </div>
+    </div>
   )
 }
 
