@@ -16,7 +16,7 @@ function extractSignaturesFromPDF(pdfBuffer) {
   const str = pdfBuffer.toString('latin1')
   const signatures = []
 
-  // Find all signature objects: /Type /Sig with /ByteRange and /Contents
+  // Strategy 1: Find signature objects via /ByteRange — standard PAdES/CMS
   const byteRangeRegex = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/g
   let match
 
@@ -28,26 +28,68 @@ function extractSignaturesFromPDF(pdfBuffer) {
       parseInt(match[4]),
     ]
 
-    // Find /Contents near this ByteRange
-    const searchStart = Math.max(0, match.index - 2000)
-    const searchEnd = Math.min(str.length, match.index + 2000)
-    const nearbyStr = str.substring(searchStart, searchEnd)
+    // Find the PDF object boundaries (N N obj ... endobj) that contain this ByteRange
+    let objStart = str.lastIndexOf(' obj', match.index)
+    if (objStart === -1) objStart = Math.max(0, match.index - 5000)
+    else objStart = Math.max(0, objStart - 30) // include object number
 
-    const contentsMatch = nearbyStr.match(/\/Contents\s*<([0-9a-fA-F]+)>/)
-    if (!contentsMatch) continue
+    let objEnd = str.indexOf('endobj', match.index)
+    if (objEnd === -1) objEnd = Math.min(str.length, match.index + 50000)
+    else objEnd += 6
 
-    const hexContent = contentsMatch[1]
-    const sigBuffer = Buffer.from(hexContent, 'hex')
+    const objStr = str.substring(objStart, objEnd)
 
-    // Extract signature metadata (Reason, Name, Location, ContactInfo, M)
+    // Extract /Contents hex — handle multiline hex with whitespace
+    // Gov.br PDFs often have very large /Contents fields split across lines
+    let sigBuffer = null
+    const contentsIdx = objStr.indexOf('/Contents')
+    if (contentsIdx !== -1) {
+      // Find the opening < after /Contents
+      const afterContents = objStr.substring(contentsIdx + 9)
+      const openAngle = afterContents.indexOf('<')
+      if (openAngle !== -1) {
+        // Find matching > — handle large hex blocks
+        const hexStart = openAngle + 1
+        const closeAngle = afterContents.indexOf('>', hexStart)
+        if (closeAngle !== -1) {
+          // Remove all whitespace from hex string
+          const rawHex = afterContents.substring(hexStart, closeAngle).replace(/\s+/g, '')
+          if (rawHex.length > 0 && /^[0-9a-fA-F]+$/.test(rawHex)) {
+            // Strip trailing zeros (padding common in PDF signatures)
+            const cleanHex = rawHex.replace(/0+$/, '') || rawHex
+            sigBuffer = Buffer.from(cleanHex, 'hex')
+          }
+        }
+      }
+    }
+
+    // Also try extracting directly from ByteRange offsets
+    // The signature bytes sit between byteRange[0]+byteRange[1] and byteRange[2]
+    if (!sigBuffer && byteRange[2] > byteRange[0] + byteRange[1]) {
+      const sigStart = byteRange[0] + byteRange[1]
+      const sigEnd = byteRange[2]
+      const rawSig = pdfBuffer.slice(sigStart, sigEnd).toString('latin1')
+      const hexMatch = rawSig.match(/<([0-9a-fA-F\s]+)>/)
+      if (hexMatch) {
+        const hex = hexMatch[1].replace(/\s+/g, '').replace(/0+$/, '') || hexMatch[1].replace(/\s+/g, '')
+        sigBuffer = Buffer.from(hex, 'hex')
+      }
+    }
+
+    if (!sigBuffer) {
+      console.log('[validator] ByteRange found but could not extract /Contents hex')
+      continue
+    }
+
+    // Extract signature metadata from the object
     const meta = {}
-    const reasonMatch = nearbyStr.match(/\/Reason\s*\(([^)]*)\)/)
-    const nameMatch = nearbyStr.match(/\/Name\s*\(([^)]*)\)/)
-    const locationMatch = nearbyStr.match(/\/Location\s*\(([^)]*)\)/)
-    const contactMatch = nearbyStr.match(/\/ContactInfo\s*\(([^)]*)\)/)
-    const dateMatch = nearbyStr.match(/\/M\s*\(D:(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/)
-    const filterMatch = nearbyStr.match(/\/Filter\s*\/([^\s/]+)/)
-    const subFilterMatch = nearbyStr.match(/\/SubFilter\s*\/([^\s/]+)/)
+    const reasonMatch = objStr.match(/\/Reason\s*\(([^)]*)\)/)
+    const nameMatch = objStr.match(/\/Name\s*\(([^)]*)\)/)
+    const locationMatch = objStr.match(/\/Location\s*\(([^)]*)\)/)
+    const contactMatch = objStr.match(/\/ContactInfo\s*\(([^)]*)\)/)
+    const dateMatch = objStr.match(/\/M\s*\(D:(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/)
+    const filterMatch = objStr.match(/\/Filter\s*\/([^\s/\]>]+)/)
+    const subFilterMatch = objStr.match(/\/SubFilter\s*\/([^\s/\]>]+)/)
 
     if (reasonMatch) meta.reason = decodePDFString(reasonMatch[1])
     if (nameMatch) meta.name = decodePDFString(nameMatch[1])
@@ -61,7 +103,15 @@ function extractSignaturesFromPDF(pdfBuffer) {
       )
     }
 
-    // Verify integrity: check if the signed bytes match
+    // Also try to find name in hex-encoded strings (Gov.br often uses hex for Name)
+    if (!meta.name) {
+      const hexNameMatch = objStr.match(/\/Name\s*<([0-9a-fA-F]+)>/)
+      if (hexNameMatch) {
+        try { meta.name = Buffer.from(hexNameMatch[1], 'hex').toString('utf8').replace(/\0/g, '') } catch {}
+      }
+    }
+
+    // Parse the PKCS#7 signature
     let integrityValid = false
     try {
       const signedData = Buffer.concat([
@@ -84,11 +134,12 @@ function extractSignaturesFromPDF(pdfBuffer) {
         raw: cert,
       }))
 
-      // Find signer certificate (usually the first non-CA cert)
-      const signerCert = certs.find(c => !c.subject.CN?.includes('AC ') && !c.subject.CN?.includes('Autoridade'))
-        || certs[0]
+      // Find signer certificate (skip CA certs)
+      const signerCert = certs.find(c => {
+        const cn = c.subject.CN || ''
+        return !cn.includes('AC ') && !cn.includes('Autoridade') && !cn.includes('Raiz')
+      }) || certs[0]
 
-      // Check integrity via digest comparison
       integrityValid = verifySignatureIntegrity(p7, signedData, signerCert?.raw)
 
       signatures.push({
@@ -100,20 +151,67 @@ function extractSignaturesFromPDF(pdfBuffer) {
         signatureType: detectSignatureType(certs, meta),
         raw: p7,
       })
+
+      console.log(`[validator] Signature found: ${signerCert?.subject?.CN || meta.name || 'unknown'} type=${detectSignatureType(certs, meta)}`)
     } catch (err) {
-      // Still record the signature even if parsing fails
+      console.log(`[validator] PKCS7 parse error: ${err.message}`)
+      // Still record the signature even if PKCS7 parsing fails
       signatures.push({
         byteRange,
         meta,
         certs: [],
         signerCert: null,
         integrityValid: false,
-        signatureType: 'unknown',
+        signatureType: meta.subFilter ? 'pades' : 'unknown',
         parseError: err.message,
       })
     }
   }
 
+  // Strategy 2: If no ByteRange found, look for /Type /Sig dictionaries directly
+  if (signatures.length === 0) {
+    console.log('[validator] No ByteRange found, searching for /Type /Sig objects...')
+    const sigTypeRegex = /\/Type\s*\/Sig\b/g
+    let sigMatch
+    while ((sigMatch = sigTypeRegex.exec(str)) !== null) {
+      let oStart = str.lastIndexOf(' obj', sigMatch.index)
+      if (oStart === -1) oStart = Math.max(0, sigMatch.index - 2000)
+      let oEnd = str.indexOf('endobj', sigMatch.index)
+      if (oEnd === -1) oEnd = Math.min(str.length, sigMatch.index + 50000)
+      const sigObj = str.substring(oStart, oEnd)
+
+      const meta = {}
+      const nm = sigObj.match(/\/Name\s*\(([^)]*)\)/)
+      const rm = sigObj.match(/\/Reason\s*\(([^)]*)\)/)
+      const dm = sigObj.match(/\/M\s*\(D:(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/)
+      const fm = sigObj.match(/\/Filter\s*\/([^\s/\]>]+)/)
+      const sfm = sigObj.match(/\/SubFilter\s*\/([^\s/\]>]+)/)
+      if (nm) meta.name = decodePDFString(nm[1])
+      if (rm) meta.reason = decodePDFString(rm[1])
+      if (fm) meta.filter = fm[1]
+      if (sfm) meta.subFilter = sfm[1]
+      if (dm) meta.signDate = new Date(`${dm[1]}-${dm[2]}-${dm[3]}T${dm[4]}:${dm[5]}:${dm[6]}Z`)
+
+      // Try hex name
+      if (!meta.name) {
+        const hexNm = sigObj.match(/\/Name\s*<([0-9a-fA-F]+)>/)
+        if (hexNm) try { meta.name = Buffer.from(hexNm[1], 'hex').toString('utf8').replace(/\0/g, '') } catch {}
+      }
+
+      signatures.push({
+        byteRange: null,
+        meta,
+        certs: [],
+        signerCert: null,
+        integrityValid: false,
+        signatureType: meta.subFilter?.includes('ETSI') || meta.subFilter?.includes('pkcs7') ? 'pades' : 'unknown',
+        parseError: 'Estrutura parcial — ByteRange nao encontrado neste objeto',
+      })
+      console.log(`[validator] /Type /Sig found: ${meta.name || 'unnamed'} filter=${meta.filter || '?'}`)
+    }
+  }
+
+  console.log(`[validator] Total signatures extracted: ${signatures.length}`)
   return signatures
 }
 
@@ -144,32 +242,45 @@ function verifySignatureIntegrity(p7, signedData, signerCert) {
  * Detect the type of digital signature
  */
 function detectSignatureType(certs, meta) {
-  if (!certs || certs.length === 0) return 'unknown'
+  if (!certs || certs.length === 0) {
+    // Check metadata even without certs
+    if (meta?.subFilter?.includes('ETSI') || meta?.subFilter?.includes('pkcs7')) return 'pades'
+    return 'unknown'
+  }
 
-  // Check for ICP-Brasil / Gov.br indicators
+  // Check for ICP-Brasil / Gov.br indicators in certificate chain
   for (const cert of certs) {
-    const issuerCN = cert.issuer?.CN || ''
-    const issuerO = cert.issuer?.O || ''
-    const subjectO = cert.subject?.O || ''
+    const issuerCN = (cert.issuer?.CN || '').toUpperCase()
+    const issuerO = (cert.issuer?.O || '').toUpperCase()
+    const subjectO = (cert.subject?.O || '').toUpperCase()
+    const subjectCN = (cert.subject?.CN || '').toUpperCase()
 
-    // ICP-Brasil chain indicators
-    if (issuerCN.includes('ICP-Brasil') || issuerO.includes('ICP-Brasil') ||
-        issuerCN.includes('AC Raiz') || issuerCN.includes('AC SOLUTI') ||
+    // ICP-Brasil chain indicators (comprehensive list)
+    if (issuerCN.includes('ICP-BRASIL') || issuerO.includes('ICP-BRASIL') ||
+        issuerCN.includes('AC RAIZ') || issuerCN.includes('AC SOLUTI') ||
         issuerCN.includes('AC SERASA') || issuerCN.includes('AC VALID') ||
         issuerCN.includes('AC CERTISIGN') || issuerCN.includes('AC DIGITALSIGN') ||
-        issuerCN.includes('AC SAFEWEB') || issuerCN.includes('Autoridade Certificadora')) {
+        issuerCN.includes('AC SAFEWEB') || issuerCN.includes('AC PRODEMGE') ||
+        issuerCN.includes('AC RNBCOM') || issuerCN.includes('AC LINK') ||
+        issuerCN.includes('AC BR') || issuerCN.includes('AC OAB') ||
+        issuerCN.includes('AUTORIDADE CERTIFICADORA') ||
+        issuerO.includes('INSTITUTO NACIONAL DE TECNOLOGIA DA INFORMACAO') ||
+        issuerO.includes('ITI')) {
       return 'icp-brasil'
     }
 
-    // Gov.br specific
-    if (issuerCN.includes('gov.br') || subjectO.includes('gov.br') ||
-        meta?.filter === 'Adobe.PPKLite' && meta?.subFilter?.includes('ETSI')) {
+    // Gov.br specific (assinador.iti.gov.br)
+    if (issuerCN.includes('GOV.BR') || subjectO.includes('GOV.BR') ||
+        issuerCN.includes('ASSINADOR') || subjectCN.includes('GOV.BR') ||
+        issuerO.includes('GOVERNO') || issuerO.includes('GOV BR') ||
+        issuerCN.includes('SERPRO') || issuerO.includes('SERPRO')) {
       return 'govbr'
     }
   }
 
-  // PAdES / CAdES standard
-  if (meta?.subFilter?.includes('ETSI') || meta?.subFilter?.includes('adbe.pkcs7')) {
+  // PAdES / CAdES standard — check SubFilter
+  if (meta?.subFilter?.includes('ETSI') || meta?.subFilter?.includes('adbe.pkcs7') ||
+      meta?.subFilter?.includes('pkcs7') || meta?.filter?.includes('Adobe')) {
     return 'pades'
   }
 
@@ -424,12 +535,15 @@ async function validateContract(pdfBuffer) {
   }
 
   try {
+    console.log(`[validator] Starting validation, PDF size: ${pdfBuffer.length} bytes`)
+
     // 1. Extract text from PDF
     let pdfText = ''
     try {
       const parsed = await pdfParse(pdfBuffer)
       pdfText = parsed.text || ''
       report.pageCount = parsed.numpages
+      console.log(`[validator] Text extracted: ${pdfText.length} chars, ${parsed.numpages} pages`)
     } catch (err) {
       report.observations.push({
         type: 'warning',
@@ -488,6 +602,8 @@ async function validateContract(pdfBuffer) {
     } else {
       report.status = 'invalid'
     }
+
+    console.log(`[validator] Result: status=${report.status} confidence=${confidence} signatures=${signatures.length} signers=${report.signers.map(s => s.name).join(', ')}`)
 
   } catch (err) {
     report.status = 'error'
