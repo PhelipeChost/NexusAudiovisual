@@ -323,6 +323,9 @@ async function initDb() {
     )
   `)
 
+  // Add contract_id column to existing contract_validations table
+  try { run('ALTER TABLE contract_validations ADD COLUMN contract_id INTEGER') } catch {}
+
   // Add validation columns to contracts table
   try { run('ALTER TABLE contracts ADD COLUMN validation_status TEXT') } catch {}
   try { run('ALTER TABLE contracts ADD COLUMN validation_date TEXT') } catch {}
