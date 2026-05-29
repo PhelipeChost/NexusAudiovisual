@@ -122,15 +122,11 @@ function extractSignaturesFromPDF(pdfBuffer) {
         pdfBuffer.slice(byteRange[2], byteRange[2] + byteRange[3]),
       ])
 
-      // Parse PKCS#7 / CMS structure (strict:false tolerates trailing padding bytes)
-      const derStr = sigBuffer.toString('binary')
-      let p7Asn1
-      try {
-        p7Asn1 = forge.asn1.fromDer(derStr, { strict: false })
-      } catch (derErr) {
-        // If strict:false still fails, try parsing with exact DER length
-        p7Asn1 = forge.asn1.fromDer(forge.util.createBuffer(derStr))
-      }
+      // Parse PKCS#7 / CMS structure
+      // Use forge.util.createBuffer() — passing a ByteStringBuffer instead of raw string
+      // makes fromDer read only the DER content without failing on zero-padding bytes
+      const derBuffer = forge.util.createBuffer(sigBuffer.toString('binary'))
+      const p7Asn1 = forge.asn1.fromDer(derBuffer)
       const p7 = forge.pkcs7.messageFromAsn1(p7Asn1)
 
       // Extract certificates from the signature
