@@ -1283,25 +1283,35 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
   const startDate = `${month}-01`
   const endDate = `${month}-31`
 
-  // Per-client summary: all finalized orders in this month
+  // Per-client summary: orders + standalone entries in this month
   const perClient = all(`
     SELECT c.id as client_id, c.name as client_name,
-      COUNT(o.id) as total_orders,
-      COALESCE(SUM(o.value), 0) as total_value,
+      COUNT(DISTINCT o.id) as total_orders,
+      COALESCE((SELECT SUM(o2.value) FROM orders o2 WHERE o2.client_id = c.id AND o2.company_id = ?
+        AND DATE(o2.updated_at) BETWEEN ? AND ?), 0) as total_order_value,
+      COALESCE((SELECT SUM(cse.amount) FROM client_standalone_entries cse
+        WHERE cse.client_id = c.id AND cse.company_id = ?
+        AND cse.entry_date BETWEEN ? AND ?), 0) as total_entry_value,
       COALESCE((SELECT SUM(cii.amount) FROM client_invoice_items cii
         JOIN client_invoices ci ON ci.id = cii.invoice_id
-        WHERE ci.client_id = c.id AND ci.company_id = ? AND ci.status = 'paid'), 0) as total_received,
+        WHERE ci.client_id = c.id AND ci.company_id = ? AND ci.status = 'paid'), 0)
+      + COALESCE((SELECT SUM(cse2.amount) FROM client_standalone_entries cse2
+        WHERE cse2.client_id = c.id AND cse2.company_id = ? AND cse2.status = 'paid'), 0) as total_received,
       COALESCE((SELECT SUM(cii.amount) FROM client_invoice_items cii
         JOIN client_invoices ci ON ci.id = cii.invoice_id
-        WHERE ci.client_id = c.id AND ci.company_id = ? AND ci.status = 'pending'), 0) as total_pending_invoice
+        WHERE ci.client_id = c.id AND ci.company_id = ? AND ci.status = 'pending'), 0)
+      + COALESCE((SELECT SUM(cse3.amount) FROM client_standalone_entries cse3
+        WHERE cse3.client_id = c.id AND cse3.company_id = ? AND cse3.status = 'pending'), 0) as total_pending_invoice
     FROM clients c
     LEFT JOIN orders o ON o.client_id = c.id AND o.company_id = ?
       AND DATE(o.updated_at) BETWEEN ? AND ?
+    LEFT JOIN client_standalone_entries cse_check ON cse_check.client_id = c.id AND cse_check.company_id = ?
+      AND cse_check.entry_date BETWEEN ? AND ?
     WHERE c.company_id = ? AND c.active = 1
     GROUP BY c.id
-    HAVING total_orders > 0
-    ORDER BY total_value DESC
-  `, [cid, cid, cid, startDate, endDate, cid])
+    HAVING total_orders > 0 OR total_entry_value > 0
+    ORDER BY (total_order_value + total_entry_value) DESC
+  `, [cid, startDate, endDate, cid, startDate, endDate, cid, cid, cid, cid, cid, startDate, endDate, cid, startDate, endDate, cid])
 
   // Per-editor summary (includes both direct editors AND team membership editors)
   const perEditor = all(`
@@ -1324,7 +1334,7 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
     ORDER BY total_value DESC
   `, [cid, cid, cid, startDate, endDate, cid, cid])
 
-  // Totals
+  // Totals (orders + standalone entries)
   const totals = get(`
     SELECT
       COALESCE(SUM(o.value), 0) as total_billed
@@ -1332,16 +1342,34 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
     WHERE o.company_id = ? AND DATE(o.updated_at) BETWEEN ? AND ?
   `, [cid, startDate, endDate])
 
-  const totalReceivedClients = get(`
+  const totalBilledEntries = get(`
+    SELECT COALESCE(SUM(cse.amount), 0) as total
+    FROM client_standalone_entries cse WHERE cse.company_id = ?
+    AND cse.entry_date BETWEEN ? AND ?
+  `, [cid, startDate, endDate])
+
+  const totalReceivedInvoices = get(`
     SELECT COALESCE(SUM(ci.total_amount), 0) as total
     FROM client_invoices ci WHERE ci.company_id = ? AND ci.status = 'paid'
     AND DATE(ci.paid_at) BETWEEN ? AND ?
   `, [cid, startDate, endDate])
 
-  const totalPendingClients = get(`
+  const totalReceivedEntries = get(`
+    SELECT COALESCE(SUM(cse.amount), 0) as total
+    FROM client_standalone_entries cse WHERE cse.company_id = ? AND cse.status = 'paid'
+    AND DATE(cse.paid_at) BETWEEN ? AND ?
+  `, [cid, startDate, endDate])
+
+  const totalPendingInvoices = get(`
     SELECT COALESCE(SUM(ci.total_amount), 0) as total
     FROM client_invoices ci WHERE ci.company_id = ? AND ci.status = 'pending'
     AND DATE(ci.created_at) BETWEEN ? AND ?
+  `, [cid, startDate, endDate])
+
+  const totalPendingEntries = get(`
+    SELECT COALESCE(SUM(cse.amount), 0) as total
+    FROM client_standalone_entries cse WHERE cse.company_id = ? AND cse.status = 'pending'
+    AND cse.entry_date BETWEEN ? AND ?
   `, [cid, startDate, endDate])
 
   const totalPaidEditors = get(`
@@ -1356,14 +1384,20 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
     AND DATE(epb.created_at) BETWEEN ? AND ?
   `, [cid, startDate, endDate])
 
+  // Merge perClient: add total_value combining orders + entries
+  const perClientMerged = perClient.map(c => ({
+    ...c,
+    total_value: c.total_order_value + c.total_entry_value,
+  }))
+
   res.json({
     month,
-    totalBilled: totals.total_billed,
-    totalReceivedClients: totalReceivedClients.total,
-    totalPendingClients: totalPendingClients.total,
+    totalBilled: totals.total_billed + totalBilledEntries.total,
+    totalReceivedClients: totalReceivedInvoices.total + totalReceivedEntries.total,
+    totalPendingClients: totalPendingInvoices.total + totalPendingEntries.total,
     totalPaidEditors: totalPaidEditors.total,
     totalPendingEditors: totalPendingEditors.total,
-    perClient,
+    perClient: perClientMerged,
     perEditor,
   })
 })

@@ -208,7 +208,14 @@ function OverviewTab({ month }) {
             cells: [
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }} key="n">
                 <Avatar name={c.client_name} size={22} />
-                <span style={{ fontSize: 13, color: theme.colors.text }}>{c.client_name}</span>
+                <div>
+                  <span style={{ fontSize: 13, color: theme.colors.text }}>{c.client_name}</span>
+                  {c.total_entry_value > 0 && (
+                    <div style={{ fontSize: 9.5, color: theme.colors.primary, marginTop: 1 }}>
+                      incl. {fmtBRL(c.total_entry_value, true)} avulso
+                    </div>
+                  )}
+                </div>
               </div>,
               <span className="mono tnum">{c.total_orders}</span>,
               <span className="mono tnum" style={{ fontWeight: 600 }}>{fmtBRL(c.total_value, true)}</span>,
