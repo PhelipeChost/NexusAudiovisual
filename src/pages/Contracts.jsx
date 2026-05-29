@@ -172,6 +172,16 @@ export default function Contracts() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {c.validation_status === 'valid' && (
+                    <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 4, background: 'rgba(124,224,184,0.12)', color: theme.colors.mint, fontWeight: 600 }}>
+                      ✓ PDF validado
+                    </span>
+                  )}
+                  {c.validation_status === 'partially_valid' && (
+                    <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 4, background: 'rgba(217,183,112,0.12)', color: theme.colors.warm, fontWeight: 600 }}>
+                      ⚠ parcial
+                    </span>
+                  )}
                   {c.signature_status === 'signed' && (
                     <span style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 4, background: 'rgba(124,224,184,0.12)', color: theme.colors.mint, fontWeight: 600 }}>
                       ✓ assinado
@@ -279,7 +289,7 @@ export default function Contracts() {
       {/* Validate PDF modal */}
       <Modal open={!!validateModal} onClose={() => setValidateModal(null)} title="Validar PDF assinado" width={740}>
         {validateModal && (
-          <ContractValidatePanel contract={validateModal} onClose={() => setValidateModal(null)} />
+          <ContractValidatePanel contract={validateModal} onClose={() => setValidateModal(null)} onValidated={() => { setValidateModal(null); load() }} />
         )}
       </Modal>
     </div>
@@ -1051,6 +1061,25 @@ function ContractDetail({ contract, loading, onEdit, onDelete, onPreview, onSend
         </div>
       )}
 
+      {/* Validation status */}
+      {contract.validation_status && (
+        <div style={{
+          padding: 12, borderRadius: 8,
+          background: contract.validation_status === 'valid' ? 'rgba(124,224,184,0.1)' : 'rgba(217,183,112,0.1)',
+          border: `1px solid ${contract.validation_status === 'valid' ? theme.colors.mint : theme.colors.warm}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: contract.validation_status === 'valid' ? theme.colors.mint : theme.colors.warm }}>
+              {contract.validation_status === 'valid' ? '✅ PDF assinado validado' : '⚠ PDF parcialmente validado'}
+            </div>
+            <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
+              {contract.validated_filename} — {contract.validation_date ? new Date(contract.validation_date).toLocaleDateString('pt-BR') : ''}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Signature status */}
       {contract.signature_status && contract.signature_status !== 'draft' && (
         <div style={{
@@ -1332,7 +1361,7 @@ const OBS_ICON = {
   info: { icon: 'info', color: theme.colors.primary },
 }
 
-function ContractValidatePanel({ contract, onClose }) {
+function ContractValidatePanel({ contract, onClose, onValidated }) {
   const [file, setFile] = useState(null)
   const [dragging, setDragging] = useState(false)
   const [validating, setValidating] = useState(false)
@@ -1356,8 +1385,12 @@ function ContractValidatePanel({ contract, onClose }) {
     setValidating(true)
     setReport(null)
     try {
-      const result = await api.contracts.validate(file)
+      const result = await api.contracts.validate(file, contract.id)
       setReport(result)
+      // If valid, notify parent to refresh contract list
+      if (result.status === 'valid' || result.status === 'partially_valid') {
+        if (onValidated) setTimeout(() => onValidated(), 1500)
+      }
     } catch (err) {
       setReport({ status: 'error', observations: [{ type: 'error', message: err.message }] })
     } finally {

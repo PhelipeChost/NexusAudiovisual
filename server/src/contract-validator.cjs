@@ -123,10 +123,11 @@ function extractSignaturesFromPDF(pdfBuffer) {
       ])
 
       // Parse PKCS#7 / CMS structure
-      // Use forge.util.createBuffer() — passing a ByteStringBuffer instead of raw string
-      // makes fromDer read only the DER content without failing on zero-padding bytes
-      const derBuffer = forge.util.createBuffer(sigBuffer.toString('binary'))
-      const p7Asn1 = forge.asn1.fromDer(derBuffer)
+      // PDF signatures are zero-padded in /Contents — parseAllBytes:false tells forge
+      // to stop at the end of the DER structure and ignore trailing zeros
+      const derStr = sigBuffer.toString('binary')
+      console.log(`[validator] DER first bytes: ${sigBuffer.slice(0, 8).toString('hex')}`)
+      const p7Asn1 = forge.asn1.fromDer(derStr, { strict: false, parseAllBytes: false, decodeBitStrings: true })
       const p7 = forge.pkcs7.messageFromAsn1(p7Asn1)
 
       // Extract certificates from the signature

@@ -309,6 +309,7 @@ async function initDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       company_id INTEGER NOT NULL,
       user_id INTEGER NOT NULL,
+      contract_id INTEGER,
       filename TEXT NOT NULL,
       file_size INTEGER,
       status TEXT NOT NULL DEFAULT 'pending',
@@ -317,9 +318,15 @@ async function initDb() {
       confidence INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (company_id) REFERENCES companies(id),
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (contract_id) REFERENCES contracts(id)
     )
   `)
+
+  // Add validation columns to contracts table
+  try { run('ALTER TABLE contracts ADD COLUMN validation_status TEXT') } catch {}
+  try { run('ALTER TABLE contracts ADD COLUMN validation_date TEXT') } catch {}
+  try { run('ALTER TABLE contracts ADD COLUMN validated_filename TEXT') } catch {}
 
   // ============ CLIENT STANDALONE ENTRIES (lançamentos avulsos para clientes) ============
 

@@ -3850,17 +3850,24 @@ router.post('/contracts/validate', authMiddleware, upload.single('file'), async 
   try {
     if (!req.file) return res.status(400).json({ error: 'Arquivo PDF obrigatório' })
 
+    const contractId = req.body.contract_id || null
     const report = await validateContract(req.file.buffer)
 
     // Save validation to history
     const result = run(
-      'INSERT INTO contract_validations (company_id, user_id, filename, file_size, status, report, signature_count, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO contract_validations (company_id, user_id, filename, file_size, status, report, signature_count, confidence, contract_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [req.user.company_id, req.user.id, req.file.originalname, req.file.size,
-        report.status, JSON.stringify(report), report.signatureCount, report.confidence]
+        report.status, JSON.stringify(report), report.signatureCount, report.confidence, contractId]
     )
 
+    // If linked to a contract and validation passed, update contract's validation status
+    if (contractId && (report.status === 'valid' || report.status === 'partially_valid')) {
+      run('UPDATE contracts SET validation_status = ?, validation_date = ?, validated_filename = ? WHERE id = ? AND company_id = ?',
+        [report.status, new Date().toISOString(), req.file.originalname, contractId, req.user.company_id])
+    }
+
     run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
-      [req.user.company_id, req.user.id, 'validated', 'contract', result.lastInsertRowid,
+      [req.user.company_id, req.user.id, 'validated', 'contract', contractId || result.lastInsertRowid,
         `Validação de contrato: ${req.file.originalname} — ${report.status} (${report.confidence}%)`])
 
     res.json({ id: Number(result.lastInsertRowid), ...report })

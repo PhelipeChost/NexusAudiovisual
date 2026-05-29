@@ -104,9 +104,10 @@ const api = {
     }).then(r => r.json()),
     govbrAvailable: (token) => fetch(`${BASE_URL}/contracts/sign/${token}/govbr-available`).then(r => r.json()),
     // Validation
-    validate: (file) => {
+    validate: (file, contractId) => {
       const formData = new FormData()
       formData.append('file', file)
+      if (contractId) formData.append('contract_id', contractId)
       const token = localStorage.getItem('nexus_token')
       return fetch(`${BASE_URL}/contracts/validate`, {
         method: 'POST',
