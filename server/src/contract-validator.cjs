@@ -55,9 +55,11 @@ function extractSignaturesFromPDF(pdfBuffer) {
           // Remove all whitespace from hex string
           const rawHex = afterContents.substring(hexStart, closeAngle).replace(/\s+/g, '')
           if (rawHex.length > 0 && /^[0-9a-fA-F]+$/.test(rawHex)) {
-            // Strip trailing zeros (padding common in PDF signatures)
-            const cleanHex = rawHex.replace(/0+$/, '') || rawHex
-            sigBuffer = Buffer.from(cleanHex, 'hex')
+            // Parse the DER length from the hex to find exact signature size
+            // DER: TAG(1 byte) + LENGTH(1-4 bytes) + VALUE
+            // Don't strip trailing zeros blindly — read the actual DER length
+            sigBuffer = extractDERFromPaddedHex(rawHex)
+            console.log(`[validator] /Contents hex: ${rawHex.length} hex chars -> DER buffer: ${sigBuffer?.length || 0} bytes`)
           }
         }
       }
@@ -71,8 +73,9 @@ function extractSignaturesFromPDF(pdfBuffer) {
       const rawSig = pdfBuffer.slice(sigStart, sigEnd).toString('latin1')
       const hexMatch = rawSig.match(/<([0-9a-fA-F\s]+)>/)
       if (hexMatch) {
-        const hex = hexMatch[1].replace(/\s+/g, '').replace(/0+$/, '') || hexMatch[1].replace(/\s+/g, '')
-        sigBuffer = Buffer.from(hex, 'hex')
+        const hex = hexMatch[1].replace(/\s+/g, '')
+        sigBuffer = extractDERFromPaddedHex(hex)
+        console.log(`[validator] ByteRange extraction: ${hex.length} hex chars -> DER buffer: ${sigBuffer?.length || 0} bytes`)
       }
     }
 
@@ -540,15 +543,33 @@ async function validateContract(pdfBuffer) {
     // 1. Extract text from PDF
     let pdfText = ''
     try {
-      const parsed = await pdfParse(pdfBuffer)
+      const parsed = await pdfParse(pdfBuffer, { max: 0 }) // max:0 = no page limit
       pdfText = parsed.text || ''
       report.pageCount = parsed.numpages
       console.log(`[validator] Text extracted: ${pdfText.length} chars, ${parsed.numpages} pages`)
     } catch (err) {
-      report.observations.push({
-        type: 'warning',
-        message: 'Não foi possível extrair texto do PDF — análise textual limitada',
-      })
+      console.log(`[validator] pdf-parse failed: ${err.message}`)
+      // Fallback: try to extract basic text via regex from PDF stream
+      try {
+        const textChunks = []
+        const streamRegex = /\(([^)]{3,})\)/g
+        const latin1 = pdfBuffer.toString('latin1')
+        let tm
+        while ((tm = streamRegex.exec(latin1)) !== null) {
+          const decoded = tm[1].replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\\\/g, '\\')
+          if (/[a-zA-ZÀ-ú]{2,}/.test(decoded)) textChunks.push(decoded)
+        }
+        if (textChunks.length > 0) {
+          pdfText = textChunks.join(' ')
+          console.log(`[validator] Fallback text: ${pdfText.length} chars from ${textChunks.length} chunks`)
+        }
+      } catch {}
+      if (!pdfText) {
+        report.observations.push({
+          type: 'warning',
+          message: 'Não foi possível extrair texto do PDF — análise textual limitada',
+        })
+      }
     }
 
     // 2. Analyze contract text
@@ -640,6 +661,49 @@ function decodePDFString(str) {
     return str.replace(/\\(\d{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
   } catch {
     return str
+  }
+}
+
+/**
+ * Extract the actual DER content from a zero-padded hex string.
+ * PDF signature /Contents fields are allocated at a fixed size and zero-padded.
+ * We read the ASN.1/DER header to determine the actual content length.
+ */
+function extractDERFromPaddedHex(hexStr) {
+  if (!hexStr || hexStr.length < 4) return null
+  try {
+    const fullBuf = Buffer.from(hexStr, 'hex')
+    if (fullBuf.length < 2) return null
+
+    // Read DER Tag + Length to determine actual size
+    // Tag is byte 0, Length encoding starts at byte 1
+    let offset = 1
+    const lenByte = fullBuf[offset]
+    let totalLen
+
+    if (lenByte < 0x80) {
+      // Short form: length is directly in this byte
+      totalLen = 2 + lenByte
+    } else if (lenByte === 0x80) {
+      // Indefinite length — just use full buffer
+      return fullBuf
+    } else {
+      // Long form: lenByte & 0x7F = number of length bytes
+      const numLenBytes = lenByte & 0x7F
+      if (numLenBytes > 4 || offset + 1 + numLenBytes > fullBuf.length) return fullBuf
+      let contentLen = 0
+      for (let i = 0; i < numLenBytes; i++) {
+        contentLen = (contentLen << 8) | fullBuf[offset + 1 + i]
+      }
+      totalLen = 1 + 1 + numLenBytes + contentLen
+    }
+
+    if (totalLen <= 0 || totalLen > fullBuf.length) return fullBuf
+    console.log(`[validator] DER actual size: ${totalLen} bytes (padded buffer: ${fullBuf.length} bytes)`)
+    return fullBuf.slice(0, totalLen)
+  } catch (err) {
+    console.log(`[validator] DER length parse failed: ${err.message}, using full buffer`)
+    return Buffer.from(hexStr, 'hex')
   }
 }
 
