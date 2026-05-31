@@ -3948,20 +3948,54 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
   const startDate = `${month}-01`
   const endDate = `${month}-31`
 
-  // Platform income: sum of editor_value from completed orders this month
-  // (orders where the user is assigned as editor AND column is "Finalizado")
+  // Platform income: PAID editor payment batches in this month
+  // Income only counts when the comprovante (proof) is registered — paid_at date determines the month
   const platformIncome = all(`
+    SELECT epb.id as batch_id, epb.total_amount, epb.paid_at, epb.notes as batch_notes,
+      GROUP_CONCAT(o.title, ', ') as order_titles,
+      GROUP_CONCAT(DISTINCT c.name) as client_names,
+      GROUP_CONCAT(DISTINCT co.name) as company_names
+    FROM editor_payment_batches epb
+    LEFT JOIN editor_payment_items epi ON epi.batch_id = epb.id
+    LEFT JOIN orders o ON o.id = epi.order_id
+    LEFT JOIN clients c ON c.id = o.client_id
+    LEFT JOIN companies co ON co.id = o.company_id
+    WHERE epb.editor_id = ? AND epb.status = 'paid'
+    AND DATE(epb.paid_at) BETWEEN ? AND ?
+    GROUP BY epb.id
+    ORDER BY epb.paid_at DESC
+  `, [uid, startDate, endDate])
+
+  // Also include individual payments (legacy) paid this month
+  const legacyPayments = all(`
+    SELECT p.id, p.amount, p.paid_at, p.notes, o.title as order_title, c.name as client_name, co.name as company_name
+    FROM payments p
+    LEFT JOIN orders o ON o.id = p.order_id
+    LEFT JOIN clients c ON c.id = o.client_id
+    LEFT JOIN companies co ON co.id = o.company_id
+    WHERE p.editor_id = ? AND p.status = 'paid'
+    AND DATE(p.paid_at) BETWEEN ? AND ?
+    AND p.order_id NOT IN (SELECT epi.order_id FROM editor_payment_items epi)
+    ORDER BY p.paid_at DESC
+  `, [uid, startDate, endDate])
+
+  const totalPlatformIncome = platformIncome.reduce((s, b) => s + (b.total_amount || 0), 0)
+    + legacyPayments.reduce((s, p) => s + (p.amount || 0), 0)
+
+  // Pending platform work: completed orders not yet paid (for info only, NOT counted as income)
+  const pendingPlatformWork = all(`
     SELECT o.id, o.title, o.editor_value, o.updated_at, c.name as client_name, co.name as company_name
     FROM orders o
     LEFT JOIN clients c ON c.id = o.client_id
     LEFT JOIN companies co ON co.id = o.company_id
     JOIN kanban_columns kc ON kc.id = o.column_id
-    WHERE o.editor_id = ? AND kc.name = 'Finalizado'
-    AND DATE(o.updated_at) BETWEEN ? AND ?
+    WHERE o.editor_id = ? AND kc.name = 'Finalizado' AND o.editor_value > 0
+    AND o.id NOT IN (SELECT epi.order_id FROM editor_payment_items epi)
+    AND o.id NOT IN (SELECT p.order_id FROM payments p WHERE p.status = 'paid' AND p.order_id IS NOT NULL)
     ORDER BY o.updated_at DESC
-  `, [uid, startDate, endDate])
+  `, [uid])
 
-  const totalPlatformIncome = platformIncome.reduce((s, o) => s + (o.editor_value || 0), 0)
+  const totalPendingPlatform = pendingPlatformWork.reduce((s, o) => s + (o.editor_value || 0), 0)
 
   // Manual income entries
   const incomeEntries = all(`
@@ -4003,7 +4037,10 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
     totalDesejo,
     totalEconomia,
     balance,
+    totalPendingPlatform,
     platformIncome,
+    legacyPayments,
+    pendingPlatformWork,
     incomeEntries,
     expensesByCategory,
   })

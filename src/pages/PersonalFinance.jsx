@@ -114,7 +114,9 @@ export default function PersonalFinance() {
   const {
     totalIncome = 0, totalPlatformIncome = 0, totalManualIncome = 0,
     totalExpenses = 0, totalNecessidade = 0, totalDesejo = 0, totalEconomia = 0,
-    balance = 0, platformIncome = [], incomeEntries = [], expensesByCategory = {},
+    balance = 0, totalPendingPlatform = 0,
+    platformIncome = [], legacyPayments = [], pendingPlatformWork = [],
+    incomeEntries = [], expensesByCategory = {},
   } = data || {}
 
   const idealNecessidade = totalIncome * 0.5
@@ -396,28 +398,80 @@ export default function PersonalFinance() {
                 </button>
               </div>
 
-              {/* Platform income (auto) */}
-              {platformIncome.length > 0 && (
+              {/* Platform income — PAID batches only */}
+              {(platformIncome.length > 0 || legacyPayments.length > 0) && (
                 <div style={{ marginBottom: 16 }}>
-                  <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.primary }}>
-                    Plataforma ({fmtBRL(totalPlatformIncome)})
+                  <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.mint }}>
+                    Recebido da plataforma ({fmtBRL(totalPlatformIncome)})
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {platformIncome.map(o => (
+                    {platformIncome.map(b => (
+                      <div key={`batch-${b.batch_id}`} style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '10px 12px', borderRadius: 8,
+                        background: theme.colors.mintMuted,
+                      }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 13, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {b.order_titles || 'Lote de pagamento'}
+                          </div>
+                          <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
+                            {b.client_names}{b.company_names ? ` · ${b.company_names}` : ''}
+                            {b.paid_at && ` · ${new Date(b.paid_at).toLocaleDateString('pt-BR')}`}
+                          </div>
+                        </div>
+                        <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint, fontWeight: 600, marginLeft: 8 }}>
+                          {fmtBRL(b.total_amount)}
+                        </span>
+                      </div>
+                    ))}
+                    {legacyPayments.map(p => (
+                      <div key={`pay-${p.id}`} style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '10px 12px', borderRadius: 8,
+                        background: theme.colors.mintMuted,
+                      }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 13, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.order_title || p.notes || 'Pagamento'}
+                          </div>
+                          <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
+                            {p.client_name}{p.company_name ? ` · ${p.company_name}` : ''}
+                            {p.paid_at && ` · ${new Date(p.paid_at).toLocaleDateString('pt-BR')}`}
+                          </div>
+                        </div>
+                        <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint, fontWeight: 600, marginLeft: 8 }}>
+                          {fmtBRL(p.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pending platform work — NOT counted as income */}
+              {pendingPlatformWork.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.gold }}>
+                    Pendente de pagamento ({fmtBRL(totalPendingPlatform)})
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {pendingPlatformWork.map(o => (
                       <div key={o.id} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: '10px 12px', borderRadius: 8,
-                        background: theme.colors.primaryMuted,
+                        background: theme.colors.goldMuted,
+                        opacity: 0.7,
                       }}>
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontSize: 13, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {o.title}
                           </div>
                           <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
-                            {o.client_name}{o.company_name ? ` · ${o.company_name}` : ''}
+                            {o.client_name}{o.company_name ? ` · ${o.company_name}` : ''} · aguardando comprovante
                           </div>
                         </div>
-                        <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint, fontWeight: 600, marginLeft: 8 }}>
+                        <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.gold, fontWeight: 600, marginLeft: 8 }}>
                           {fmtBRL(o.editor_value)}
                         </span>
                       </div>
@@ -462,7 +516,7 @@ export default function PersonalFinance() {
                 </div>
               )}
 
-              {platformIncome.length === 0 && incomeEntries.length === 0 && (
+              {platformIncome.length === 0 && legacyPayments.length === 0 && pendingPlatformWork.length === 0 && incomeEntries.length === 0 && (
                 <div style={{ textAlign: 'center', padding: 32, color: theme.colors.textMuted, fontSize: 13 }}>
                   Nenhuma entrada este mes.
                   <br />
@@ -598,9 +652,13 @@ export default function PersonalFinance() {
             {(() => {
               // Group income by source
               const sources = {}
-              for (const o of platformIncome) {
+              for (const b of platformIncome) {
                 const key = 'Plataforma'
-                sources[key] = (sources[key] || 0) + (o.editor_value || 0)
+                sources[key] = (sources[key] || 0) + (b.total_amount || 0)
+              }
+              for (const p of legacyPayments) {
+                const key = 'Plataforma'
+                sources[key] = (sources[key] || 0) + (p.amount || 0)
               }
               for (const e of incomeEntries) {
                 sources[e.source] = (sources[e.source] || 0) + (e.amount || 0)
