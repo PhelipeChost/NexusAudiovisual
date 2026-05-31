@@ -3948,54 +3948,135 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
   const startDate = `${month}-01`
   const endDate = `${month}-31`
 
-  // Platform income: PAID editor payment batches in this month
-  // Income only counts when the comprovante (proof) is registered — paid_at date determines the month
-  const platformIncome = all(`
-    SELECT epb.id as batch_id, epb.total_amount, epb.paid_at, epb.notes as batch_notes,
-      GROUP_CONCAT(o.title, ', ') as order_titles,
-      GROUP_CONCAT(DISTINCT c.name) as client_names,
-      GROUP_CONCAT(DISTINCT co.name) as company_names
-    FROM editor_payment_batches epb
-    LEFT JOIN editor_payment_items epi ON epi.batch_id = epb.id
-    LEFT JOIN orders o ON o.id = epi.order_id
-    LEFT JOIN clients c ON c.id = o.client_id
-    LEFT JOIN companies co ON co.id = o.company_id
-    WHERE epb.editor_id = ? AND epb.status = 'paid'
-    AND DATE(epb.paid_at) BETWEEN ? AND ?
-    GROUP BY epb.id
-    ORDER BY epb.paid_at DESC
-  `, [uid, startDate, endDate])
+  const cid = req.user.company_id
+  const role = req.user.role
 
-  // Also include individual payments (legacy) paid this month
-  const legacyPayments = all(`
-    SELECT p.id, p.amount, p.paid_at, p.notes, o.title as order_title, c.name as client_name, co.name as company_name
-    FROM payments p
-    LEFT JOIN orders o ON o.id = p.order_id
-    LEFT JOIN clients c ON c.id = o.client_id
-    LEFT JOIN companies co ON co.id = o.company_id
-    WHERE p.editor_id = ? AND p.status = 'paid'
-    AND DATE(p.paid_at) BETWEEN ? AND ?
-    AND p.order_id NOT IN (SELECT epi.order_id FROM editor_payment_items epi)
-    ORDER BY p.paid_at DESC
-  `, [uid, startDate, endDate])
+  let platformIncome = []
+  let legacyPayments = []
+  let pendingPlatformWork = []
+  let totalPlatformIncome = 0
+  let totalPendingPlatform = 0
 
-  const totalPlatformIncome = platformIncome.reduce((s, b) => s + (b.total_amount || 0), 0)
-    + legacyPayments.reduce((s, p) => s + (p.amount || 0), 0)
+  if (role === 'gestor') {
+    // GESTOR income: client_invoices paid + client_standalone_entries paid in this month
+    // Date is determined by paid_at (when comprovante was registered)
+    const paidInvoices = all(`
+      SELECT ci.id, ci.total_amount as amount, ci.paid_at, ci.notes,
+        cl.name as client_name,
+        GROUP_CONCAT(o.title, ', ') as order_titles
+      FROM client_invoices ci
+      JOIN clients cl ON cl.id = ci.client_id
+      LEFT JOIN client_invoice_items cii ON cii.invoice_id = ci.id
+      LEFT JOIN orders o ON o.id = cii.order_id
+      WHERE ci.company_id = ? AND ci.status = 'paid'
+      AND DATE(ci.paid_at) BETWEEN ? AND ?
+      GROUP BY ci.id
+      ORDER BY ci.paid_at DESC
+    `, [cid, startDate, endDate])
 
-  // Pending platform work: completed orders not yet paid (for info only, NOT counted as income)
-  const pendingPlatformWork = all(`
-    SELECT o.id, o.title, o.editor_value, o.updated_at, c.name as client_name, co.name as company_name
-    FROM orders o
-    LEFT JOIN clients c ON c.id = o.client_id
-    LEFT JOIN companies co ON co.id = o.company_id
-    JOIN kanban_columns kc ON kc.id = o.column_id
-    WHERE o.editor_id = ? AND kc.name = 'Finalizado' AND o.editor_value > 0
-    AND o.id NOT IN (SELECT epi.order_id FROM editor_payment_items epi)
-    AND o.id NOT IN (SELECT p.order_id FROM payments p WHERE p.status = 'paid' AND p.order_id IS NOT NULL)
-    ORDER BY o.updated_at DESC
-  `, [uid])
+    const paidEntries = all(`
+      SELECT cse.id, cse.amount, cse.paid_at, cse.description as notes, cl.name as client_name
+      FROM client_standalone_entries cse
+      JOIN clients cl ON cl.id = cse.client_id
+      WHERE cse.company_id = ? AND cse.status = 'paid'
+      AND DATE(cse.paid_at) BETWEEN ? AND ?
+      ORDER BY cse.paid_at DESC
+    `, [cid, startDate, endDate])
 
-  const totalPendingPlatform = pendingPlatformWork.reduce((s, o) => s + (o.editor_value || 0), 0)
+    // Map to common format for frontend
+    platformIncome = paidInvoices.map(inv => ({
+      ...inv, type: 'invoice',
+      title: inv.order_titles || 'Nota de cobranca',
+    }))
+    legacyPayments = paidEntries.map(e => ({
+      ...e, type: 'entry',
+      order_title: e.notes || 'Lancamento avulso',
+    }))
+
+    totalPlatformIncome = paidInvoices.reduce((s, i) => s + (i.amount || 0), 0)
+      + paidEntries.reduce((s, e) => s + (e.amount || 0), 0)
+
+    // Pending: invoices + entries still pending (NOT counted as income)
+    const pendingInvoices = all(`
+      SELECT ci.id, ci.total_amount as amount, ci.created_at,
+        cl.name as client_name,
+        GROUP_CONCAT(o.title, ', ') as order_titles
+      FROM client_invoices ci
+      JOIN clients cl ON cl.id = ci.client_id
+      LEFT JOIN client_invoice_items cii ON cii.invoice_id = ci.id
+      LEFT JOIN orders o ON o.id = cii.order_id
+      WHERE ci.company_id = ? AND ci.status = 'pending'
+      GROUP BY ci.id
+      ORDER BY ci.created_at DESC
+    `, [cid])
+
+    const pendingEntries = all(`
+      SELECT cse.id, cse.amount, cse.entry_date, cse.description, cl.name as client_name
+      FROM client_standalone_entries cse
+      JOIN clients cl ON cl.id = cse.client_id
+      WHERE cse.company_id = ? AND cse.status = 'pending'
+      ORDER BY cse.entry_date DESC
+    `, [cid])
+
+    pendingPlatformWork = [
+      ...pendingInvoices.map(i => ({
+        id: `inv-${i.id}`, title: i.order_titles || 'Nota de cobranca',
+        editor_value: i.amount, client_name: i.client_name, updated_at: i.created_at,
+      })),
+      ...pendingEntries.map(e => ({
+        id: `entry-${e.id}`, title: e.description || 'Lancamento avulso',
+        editor_value: e.amount, client_name: e.client_name, updated_at: e.entry_date,
+      })),
+    ]
+    totalPendingPlatform = pendingPlatformWork.reduce((s, w) => s + (w.editor_value || 0), 0)
+
+  } else {
+    // EDITOR income: paid editor_payment_batches + legacy payments
+    platformIncome = all(`
+      SELECT epb.id as batch_id, epb.total_amount, epb.paid_at, epb.notes as batch_notes,
+        GROUP_CONCAT(o.title, ', ') as order_titles,
+        GROUP_CONCAT(DISTINCT c.name) as client_names,
+        GROUP_CONCAT(DISTINCT co.name) as company_names
+      FROM editor_payment_batches epb
+      LEFT JOIN editor_payment_items epi ON epi.batch_id = epb.id
+      LEFT JOIN orders o ON o.id = epi.order_id
+      LEFT JOIN clients c ON c.id = o.client_id
+      LEFT JOIN companies co ON co.id = o.company_id
+      WHERE epb.editor_id = ? AND epb.status = 'paid'
+      AND DATE(epb.paid_at) BETWEEN ? AND ?
+      GROUP BY epb.id
+      ORDER BY epb.paid_at DESC
+    `, [uid, startDate, endDate])
+
+    legacyPayments = all(`
+      SELECT p.id, p.amount, p.paid_at, p.notes, o.title as order_title, c.name as client_name, co.name as company_name
+      FROM payments p
+      LEFT JOIN orders o ON o.id = p.order_id
+      LEFT JOIN clients c ON c.id = o.client_id
+      LEFT JOIN companies co ON co.id = o.company_id
+      WHERE p.editor_id = ? AND p.status = 'paid'
+      AND DATE(p.paid_at) BETWEEN ? AND ?
+      AND p.order_id NOT IN (SELECT epi.order_id FROM editor_payment_items epi)
+      ORDER BY p.paid_at DESC
+    `, [uid, startDate, endDate])
+
+    totalPlatformIncome = platformIncome.reduce((s, b) => s + (b.total_amount || 0), 0)
+      + legacyPayments.reduce((s, p) => s + (p.amount || 0), 0)
+
+    pendingPlatformWork = all(`
+      SELECT o.id, o.title, o.editor_value, o.updated_at, c.name as client_name, co.name as company_name
+      FROM orders o
+      LEFT JOIN clients c ON c.id = o.client_id
+      LEFT JOIN companies co ON co.id = o.company_id
+      JOIN kanban_columns kc ON kc.id = o.column_id
+      WHERE o.editor_id = ? AND kc.name = 'Finalizado' AND o.editor_value > 0
+      AND o.id NOT IN (SELECT epi.order_id FROM editor_payment_items epi)
+      AND o.id NOT IN (SELECT p.order_id FROM payments p WHERE p.status = 'paid' AND p.order_id IS NOT NULL)
+      ORDER BY o.updated_at DESC
+    `, [uid])
+
+    totalPendingPlatform = pendingPlatformWork.reduce((s, o) => s + (o.editor_value || 0), 0)
+  }
 
   // Manual income entries
   const incomeEntries = all(`

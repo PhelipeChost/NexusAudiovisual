@@ -398,35 +398,36 @@ export default function PersonalFinance() {
                 </button>
               </div>
 
-              {/* Platform income — PAID batches only */}
+              {/* Platform income — PAID only (invoices/batches with comprovante) */}
               {(platformIncome.length > 0 || legacyPayments.length > 0) && (
                 <div style={{ marginBottom: 16 }}>
                   <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.mint }}>
-                    Recebido da plataforma ({fmtBRL(totalPlatformIncome)})
+                    Recebido ({fmtBRL(totalPlatformIncome)})
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {platformIncome.map(b => (
-                      <div key={`batch-${b.batch_id}`} style={{
+                    {platformIncome.map((item, i) => (
+                      <div key={`plat-${item.batch_id || item.id || i}`} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: '10px 12px', borderRadius: 8,
                         background: theme.colors.mintMuted,
                       }}>
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontSize: 13, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {b.order_titles || 'Lote de pagamento'}
+                            {item.title || item.order_titles || 'Pagamento'}
                           </div>
                           <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
-                            {b.client_names}{b.company_names ? ` · ${b.company_names}` : ''}
-                            {b.paid_at && ` · ${new Date(b.paid_at).toLocaleDateString('pt-BR')}`}
+                            {item.client_name || item.client_names || ''}
+                            {item.company_names ? ` · ${item.company_names}` : ''}
+                            {item.paid_at && ` · ${new Date(item.paid_at).toLocaleDateString('pt-BR')}`}
                           </div>
                         </div>
                         <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint, fontWeight: 600, marginLeft: 8 }}>
-                          {fmtBRL(b.total_amount)}
+                          {fmtBRL(item.amount || item.total_amount)}
                         </span>
                       </div>
                     ))}
-                    {legacyPayments.map(p => (
-                      <div key={`pay-${p.id}`} style={{
+                    {legacyPayments.map((p, i) => (
+                      <div key={`leg-${p.id || i}`} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: '10px 12px', borderRadius: 8,
                         background: theme.colors.mintMuted,
@@ -436,7 +437,7 @@ export default function PersonalFinance() {
                             {p.order_title || p.notes || 'Pagamento'}
                           </div>
                           <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
-                            {p.client_name}{p.company_name ? ` · ${p.company_name}` : ''}
+                            {p.client_name || ''}{p.company_name ? ` · ${p.company_name}` : ''}
                             {p.paid_at && ` · ${new Date(p.paid_at).toLocaleDateString('pt-BR')}`}
                           </div>
                         </div>
@@ -652,12 +653,12 @@ export default function PersonalFinance() {
             {(() => {
               // Group income by source
               const sources = {}
-              for (const b of platformIncome) {
-                const key = 'Plataforma'
-                sources[key] = (sources[key] || 0) + (b.total_amount || 0)
+              for (const item of platformIncome) {
+                const key = item.client_name || item.client_names || 'Plataforma'
+                sources[key] = (sources[key] || 0) + (item.amount || item.total_amount || 0)
               }
               for (const p of legacyPayments) {
-                const key = 'Plataforma'
+                const key = p.client_name || 'Plataforma'
                 sources[key] = (sources[key] || 0) + (p.amount || 0)
               }
               for (const e of incomeEntries) {
