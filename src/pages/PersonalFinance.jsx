@@ -1,21 +1,37 @@
-// src/pages/PersonalFinance.jsx — Painel Financeiro Pessoal
-import { useState, useEffect, useMemo } from 'react'
+// src/pages/PersonalFinance.jsx — Painel Financeiro Pessoal (estilo planilha)
+import { useState, useEffect, useMemo, useRef } from 'react'
 import api from '../api'
 import theme from '../styles/theme'
-import Modal from '../components/Modal'
 import {
-  Icon, Spinner, Field,
-  inputStyle, btnPrimary, btnSoft, panelStyle, fmtBRL,
+  Icon, Spinner, fmtBRL, panelStyle,
 } from '../components/ui'
 import useIsMobile from '../hooks/useIsMobile'
 
-const CATEGORY_META = {
-  necessidade: { label: 'Necessidades', color: theme.colors.primary, icon: 'briefcase', pct: 50 },
-  desejo:      { label: 'Desejos',       color: theme.colors.gold,    icon: 'film',      pct: 30 },
-  economia:    { label: 'Economias',     color: theme.colors.mint,    icon: 'financial',  pct: 20 },
+const CAT = {
+  necessidade: { label: 'Necessidades', color: '#4285f4', bg: '#e8f0fe' },
+  desejo:      { label: 'Desejos',       color: '#f4b400', bg: '#fef7e0' },
+  economia:    { label: 'Economias',     color: '#0f9d58', bg: '#e6f4ea' },
 }
 
-const INCOME_SOURCES = ['Edição', 'Freelance', 'Salário', 'Investimento', 'Outro']
+// ── shared cell / row styles ──
+const cellBase = {
+  padding: '7px 10px', fontSize: 13, color: theme.colors.text,
+  borderBottom: `1px solid ${theme.colors.borderSoft}`,
+  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+}
+const cellInput = {
+  width: '100%', background: 'transparent', border: 'none', outline: 'none',
+  fontSize: 13, color: theme.colors.text, padding: 0, fontFamily: theme.fonts.ui,
+}
+const headerCell = (color) => ({
+  ...cellBase, fontWeight: 600, fontSize: 12, textTransform: 'uppercase',
+  letterSpacing: '0.06em', background: color, color: '#222',
+  borderBottom: `2px solid ${color}`,
+})
+const totalRow = (color) => ({
+  ...cellBase, fontWeight: 700, fontSize: 13, background: color, color: '#222',
+  borderBottom: 'none',
+})
 
 export default function PersonalFinance() {
   const isMobile = useIsMobile()
@@ -25,76 +41,15 @@ export default function PersonalFinance() {
   })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [showIncomeModal, setShowIncomeModal] = useState(false)
-  const [showExpenseModal, setShowExpenseModal] = useState(false)
-  const [expenseCategory, setExpenseCategory] = useState('necessidade')
-  const [incomeForm, setIncomeForm] = useState({ source: 'Edição', amount: '', description: '', entry_date: '' })
-  const [expenseForm, setExpenseForm] = useState({ name: '', amount: '', due_day: '', entry_date: '' })
-  const [activeTab, setActiveTab] = useState('resumo') // resumo, entradas, saidas
+  const [mobileTab, setMobileTab] = useState('entradas')
 
   useEffect(() => { load() }, [month])
 
   async function load() {
     setLoading(true)
-    try {
-      const d = await api.personalFinance.get(month)
-      setData(d)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleCreateIncome(e) {
-    e.preventDefault()
-    try {
-      await api.personalFinance.createIncome({
-        ...incomeForm,
-        entry_date: incomeForm.entry_date || undefined,
-      })
-      setShowIncomeModal(false)
-      setIncomeForm({ source: 'Edição', amount: '', description: '', entry_date: '' })
-      load()
-    } catch (err) { alert(err.message) }
-  }
-
-  async function handleCreateExpense(e) {
-    e.preventDefault()
-    try {
-      await api.personalFinance.createExpense({
-        ...expenseForm,
-        category: expenseCategory,
-        due_day: expenseForm.due_day ? parseInt(expenseForm.due_day) : undefined,
-        entry_date: expenseForm.entry_date || undefined,
-      })
-      setShowExpenseModal(false)
-      setExpenseForm({ name: '', amount: '', due_day: '', entry_date: '' })
-      load()
-    } catch (err) { alert(err.message) }
-  }
-
-  async function handleToggleExpense(id) {
-    try {
-      await api.personalFinance.toggleExpense(id)
-      load()
-    } catch (err) { alert(err.message) }
-  }
-
-  async function handleDeleteIncome(id) {
-    if (!confirm('Remover esta entrada?')) return
-    try {
-      await api.personalFinance.deleteIncome(id)
-      load()
-    } catch (err) { alert(err.message) }
-  }
-
-  async function handleDeleteExpense(id) {
-    if (!confirm('Remover esta despesa?')) return
-    try {
-      await api.personalFinance.deleteExpense(id)
-      load()
-    } catch (err) { alert(err.message) }
+    try { setData(await api.personalFinance.get(month)) }
+    catch (err) { console.error(err) }
+    finally { setLoading(false) }
   }
 
   function changeMonth(delta) {
@@ -105,8 +60,8 @@ export default function PersonalFinance() {
 
   const monthLabel = useMemo(() => {
     const [y, m] = month.split('-')
-    const d = new Date(parseInt(y), parseInt(m) - 1)
-    return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    return new Date(parseInt(y), parseInt(m) - 1)
+      .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
   }, [month])
 
   if (loading && !data) return <Spinner />
@@ -116,749 +71,477 @@ export default function PersonalFinance() {
     totalExpenses = 0, totalNecessidade = 0, totalDesejo = 0, totalEconomia = 0,
     balance = 0, totalPendingPlatform = 0,
     platformIncome = [], legacyPayments = [], pendingPlatformWork = [],
-    incomeEntries = [], expensesByCategory = {},
+    incomeEntries = [], expensesByCategory = {}, fixedByCategory = {},
   } = data || {}
 
-  const idealNecessidade = totalIncome * 0.5
-  const idealDesejo = totalIncome * 0.3
-  const idealEconomia = totalIncome * 0.2
+  const pctN = totalIncome > 0 ? Math.round((totalNecessidade / totalIncome) * 100) : 0
+  const pctD = totalIncome > 0 ? Math.round((totalDesejo / totalIncome) * 100) : 0
+  const pctE = totalIncome > 0 ? Math.round((totalEconomia / totalIncome) * 100) : 0
+
+  // Build all platform income items for the Entradas table
+  const allPlatformItems = [
+    ...platformIncome.map((item, i) => ({
+      id: `p-${item.batch_id || item.id || i}`,
+      name: item.title || item.order_titles || 'Pagamento',
+      amount: item.amount || item.total_amount || 0,
+      sub: item.client_name || item.client_names || '',
+      auto: true,
+    })),
+    ...legacyPayments.map((p, i) => ({
+      id: `l-${p.id || i}`,
+      name: p.order_title || p.notes || 'Pagamento',
+      amount: p.amount || 0,
+      sub: p.client_name || '',
+      auto: true,
+    })),
+  ]
+
+  const columns = [
+    { key: 'entradas', label: 'Entradas', headerColor: '#e0e0e0', totalColor: '#e0e0e0' },
+    { key: 'necessidade', ...CAT.necessidade },
+    { key: 'desejo', ...CAT.desejo },
+    { key: 'economia', ...CAT.economia },
+  ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 16 : 24 }}>
-      {/* Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 14 : 24 }}>
+      {/* ── Header ── */}
       <div style={{
         display: 'flex', flexDirection: isMobile ? 'column' : 'row',
-        alignItems: isMobile ? 'stretch' : 'center',
-        justifyContent: 'space-between', gap: isMobile ? 12 : 16,
+        alignItems: isMobile ? 'stretch' : 'flex-end',
+        justifyContent: 'space-between', gap: 12,
       }}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>Painel pessoal</div>
           <h2 className="display" style={{
-            fontSize: isMobile ? 22 : 32, margin: 0, color: theme.colors.text,
-            lineHeight: 1.1, letterSpacing: '-0.02em',
+            fontSize: isMobile ? 26 : 40, margin: 0, color: theme.colors.text,
+            lineHeight: 1, letterSpacing: '-0.02em', textTransform: 'capitalize',
           }}>
-            Financeiro Pessoal
+            {monthLabel.split(' ')[0]}
           </h2>
         </div>
 
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          flexWrap: isMobile ? 'wrap' : 'nowrap',
-        }}>
-          {/* Month navigation */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 4,
+            display: 'flex', alignItems: 'center', gap: 2,
             background: theme.colors.bgSecondary,
             border: `1px solid ${theme.colors.border}`,
             borderRadius: 8, padding: 2,
           }}>
             <button onClick={() => changeMonth(-1)} style={{
-              width: 32, height: 32, borderRadius: 6,
+              width: 30, height: 30, borderRadius: 6,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: theme.colors.textMuted,
             }}>
               <Icon name="chevronLeft" size={16} />
             </button>
             <span className="display" style={{
-              fontSize: 13, padding: '0 8px', color: theme.colors.text,
-              textTransform: 'capitalize', minWidth: isMobile ? 100 : 140, textAlign: 'center',
+              fontSize: 12, padding: '0 6px', color: theme.colors.text,
+              textTransform: 'capitalize', minWidth: 120, textAlign: 'center',
             }}>
               {monthLabel}
             </span>
             <button onClick={() => changeMonth(1)} style={{
-              width: 32, height: 32, borderRadius: 6,
+              width: 30, height: 30, borderRadius: 6,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: theme.colors.textMuted,
             }}>
               <Icon name="chevronRight" size={16} />
             </button>
           </div>
+        </div>
+      </div>
 
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button style={{ ...btnSoft, ...(isMobile ? { flex: 1, justifyContent: 'center' } : {}) }}
-              onClick={() => setShowIncomeModal(true)}>
-              <Icon name="arrowUp" size={14} />
-              Entrada
-            </button>
-            <button style={{ ...btnPrimary, ...(isMobile ? { flex: 1, justifyContent: 'center' } : {}) }}
-              onClick={() => { setExpenseCategory('necessidade'); setShowExpenseModal(true) }}>
-              <Icon name="arrowDown" size={14} />
-              Despesa
-            </button>
+      {/* ── Summary bar (Planejado x Realizado) ── */}
+      <div style={{
+        ...panelStyle, padding: isMobile ? 14 : 20,
+        display: 'flex', flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        justifyContent: 'space-between', gap: isMobile ? 14 : 24,
+      }}>
+        {/* Percentages */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 16 : 32, justifyContent: 'center' }}>
+          <div className="eyebrow" style={{ fontSize: 11, color: theme.colors.textMuted }}>Planejado x Realizado</div>
+          {[
+            { label: 'Necessidades', pct: pctN, color: CAT.necessidade.color },
+            { label: 'Desejos', pct: pctD, color: CAT.desejo.color },
+            { label: 'Economias', pct: pctE, color: CAT.economia.color },
+          ].map(s => (
+            <div key={s.label} style={{ textAlign: 'center' }}>
+              <div className="mono tnum" style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.pct}%</div>
+              <div style={{ fontSize: 11, color: theme.colors.textMuted }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Resumo */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 24,
+          ...(isMobile ? { justifyContent: 'space-around', borderTop: `1px solid ${theme.colors.border}`, paddingTop: 12 } : {}),
+        }}>
+          <div className="eyebrow" style={{ fontSize: 11, color: theme.colors.textMuted }}>Resumo</div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10, color: theme.colors.textMuted }}>Entradas</div>
+            <div className="mono tnum" style={{ fontSize: 14, color: theme.colors.mint, fontWeight: 600 }}>{fmtBRL(totalIncome)}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10, color: theme.colors.textMuted }}>Atual</div>
+            <div className="mono tnum" style={{ fontSize: 14, color: theme.colors.text, fontWeight: 600 }}>{fmtBRL(totalExpenses)}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10, color: theme.colors.textMuted }}>Resta</div>
+            <div className="mono tnum" style={{ fontSize: 14, color: balance >= 0 ? theme.colors.mint : theme.colors.danger, fontWeight: 600 }}>{fmtBRL(balance)}</div>
           </div>
         </div>
       </div>
 
-      {/* Mobile tab bar */}
+      {/* ── Mobile tab selector ── */}
       {isMobile && (
         <div style={{
-          display: 'flex', gap: 4,
-          background: theme.colors.bgSecondary,
+          display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden',
           border: `1px solid ${theme.colors.border}`,
-          borderRadius: 8, padding: 3,
         }}>
-          {[
-            { id: 'resumo', label: 'Resumo' },
-            { id: 'entradas', label: 'Entradas' },
-            { id: 'saidas', label: 'Saídas' },
-          ].map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-              flex: 1, padding: '8px 0', fontSize: 12, fontWeight: activeTab === t.id ? 600 : 400,
-              borderRadius: 6, textAlign: 'center',
-              color: activeTab === t.id ? theme.colors.text : theme.colors.textMuted,
-              background: activeTab === t.id ? theme.colors.surfaceHover : 'transparent',
+          {columns.map(col => (
+            <button key={col.key} onClick={() => setMobileTab(col.key)} style={{
+              flex: 1, padding: '10px 0', fontSize: 11, fontWeight: mobileTab === col.key ? 700 : 400,
+              color: mobileTab === col.key ? '#222' : theme.colors.textMuted,
+              background: mobileTab === col.key ? (col.headerColor || col.color) : theme.colors.bgSecondary,
+              borderRight: `1px solid ${theme.colors.border}`,
             }}>
-              {t.label}
+              {col.key === 'entradas' ? 'Entradas' : col.label}
             </button>
           ))}
         </div>
       )}
 
-      {/* Overview hero cards */}
-      {(!isMobile || activeTab === 'resumo') && (
-        <>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
-            gap: isMobile ? 8 : 14,
-          }}>
-            {/* Total income */}
-            <div style={{ ...panelStyle, padding: isMobile ? 14 : 20 }}>
-              <div className="eyebrow" style={{ fontSize: isMobile ? 9 : 11, marginBottom: isMobile ? 8 : 14 }}>
-                Receita total
-              </div>
-              <div className="display tnum" style={{
-                fontSize: isMobile ? 20 : 32, lineHeight: 1, letterSpacing: '-0.02em',
-                color: theme.colors.mint,
-              }}>
-                <span style={{ fontSize: isMobile ? 10 : 16, color: theme.colors.textMuted, marginRight: 2 }}>R$</span>
-                {Number(totalIncome).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-              </div>
-              <div style={{ height: 3, marginTop: isMobile ? 8 : 14, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: '100%', background: theme.colors.mint, opacity: 0.5 }} />
-              </div>
-            </div>
+      {/* ── Spreadsheet Tables ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)',
+        gap: isMobile ? 0 : 14,
+        alignItems: 'start',
+      }}>
+        {/* Entradas column */}
+        {(!isMobile || mobileTab === 'entradas') && (
+          <IncomeTable
+            platformItems={allPlatformItems}
+            pendingItems={pendingPlatformWork}
+            manualEntries={incomeEntries}
+            total={totalIncome}
+            totalPending={totalPendingPlatform}
+            onAdd={async (name, amount) => {
+              await api.personalFinance.createIncome({ source: name, amount, entry_date: `${month}-01` })
+              load()
+            }}
+            onDelete={async (id) => {
+              await api.personalFinance.deleteIncome(id)
+              load()
+            }}
+          />
+        )}
 
-            {/* Total expenses */}
-            <div style={{ ...panelStyle, padding: isMobile ? 14 : 20 }}>
-              <div className="eyebrow" style={{ fontSize: isMobile ? 9 : 11, marginBottom: isMobile ? 8 : 14 }}>
-                Despesas totais
-              </div>
-              <div className="display tnum" style={{
-                fontSize: isMobile ? 20 : 32, lineHeight: 1, letterSpacing: '-0.02em',
-                color: theme.colors.warm,
-              }}>
-                <span style={{ fontSize: isMobile ? 10 : 16, color: theme.colors.textMuted, marginRight: 2 }}>R$</span>
-                {Number(totalExpenses).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-              </div>
-              <div style={{ height: 3, marginTop: isMobile ? 8 : 14, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: totalIncome > 0 ? `${Math.min((totalExpenses / totalIncome) * 100, 100)}%` : '0%', background: theme.colors.warm, opacity: 0.5 }} />
-              </div>
-            </div>
+        {/* Necessidades / Desejos / Economias columns */}
+        {Object.entries(CAT).map(([cat, meta]) => {
+          if (isMobile && mobileTab !== cat) return null
+          const items = expensesByCategory[cat] || []
+          const fixed = fixedByCategory[cat] || []
+          const catTotal = items.reduce((s, e) => s + (e.amount || 0), 0)
+            + fixed.reduce((s, e) => s + (e.amount || 0), 0)
 
-            {/* Balance */}
-            <div style={{ ...panelStyle, padding: isMobile ? 14 : 20 }}>
-              <div className="eyebrow" style={{ fontSize: isMobile ? 9 : 11, marginBottom: isMobile ? 8 : 14 }}>
-                Saldo
-              </div>
-              <div className="display tnum" style={{
-                fontSize: isMobile ? 20 : 32, lineHeight: 1, letterSpacing: '-0.02em',
-                color: balance >= 0 ? theme.colors.mint : theme.colors.danger,
-              }}>
-                <span style={{ fontSize: isMobile ? 10 : 16, color: theme.colors.textMuted, marginRight: 2 }}>R$</span>
-                {Number(balance).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-              </div>
-              <div style={{ height: 3, marginTop: isMobile ? 8 : 14, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: balance >= 0 ? '100%' : '0%', background: balance >= 0 ? theme.colors.primary : theme.colors.danger, opacity: 0.5 }} />
-              </div>
-            </div>
+          return (
+            <ExpenseTable
+              key={cat}
+              category={cat}
+              meta={meta}
+              items={items}
+              fixedCosts={fixed}
+              total={catTotal}
+              month={month}
+              onAddExpense={async (name, amount, installments) => {
+                await api.personalFinance.createExpense({
+                  category: cat, name, amount,
+                  entry_date: `${month}-01`,
+                  installments: installments || undefined,
+                })
+                load()
+              }}
+              onToggle={async (id) => { await api.personalFinance.toggleExpense(id); load() }}
+              onDelete={async (id) => { await api.personalFinance.deleteExpense(id); load() }}
+              onAddFixed={async (name, amount) => {
+                await api.personalFinance.createFixedCost({ category: cat, name, amount })
+                load()
+              }}
+              onDeleteFixed={async (id) => { await api.personalFinance.deleteFixedCost(id); load() }}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
-            {/* Use percentage */}
-            <div style={{ ...panelStyle, padding: isMobile ? 14 : 20 }}>
-              <div className="eyebrow" style={{ fontSize: isMobile ? 9 : 11, marginBottom: isMobile ? 8 : 14 }}>
-                Comprometido
-              </div>
-              <div className="display tnum" style={{
-                fontSize: isMobile ? 20 : 32, lineHeight: 1, letterSpacing: '-0.02em',
-                color: theme.colors.text,
-              }}>
-                {totalIncome > 0 ? Math.round((totalExpenses / totalIncome) * 100) : 0}
-                <span style={{ fontSize: isMobile ? 12 : 18, color: theme.colors.textMuted }}>%</span>
-              </div>
-              <div style={{ height: 3, marginTop: isMobile ? 8 : 14, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: totalIncome > 0 ? `${Math.min((totalExpenses / totalIncome) * 100, 100)}%` : '0%', background: theme.colors.gold, opacity: 0.5 }} />
-              </div>
-            </div>
+/* ═══════════════════════════════════════
+   IncomeTable — coluna Entradas
+   ═══════════════════════════════════════ */
+function IncomeTable({ platformItems, pendingItems, manualEntries, total, totalPending, onAdd, onDelete }) {
+  const [draft, setDraft] = useState({ name: '', amount: '' })
+  const nameRef = useRef(null)
+
+  async function submit() {
+    if (!draft.name.trim() || !draft.amount) return
+    try {
+      await onAdd(draft.name.trim(), parseFloat(draft.amount))
+      setDraft({ name: '', amount: '' })
+      nameRef.current?.focus()
+    } catch (err) { alert(err.message) }
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); submit() }
+  }
+
+  return (
+    <div style={{ ...panelStyle, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...headerCell('#d9d9d9') }}>
+        <span>Entradas</span><span style={{ textAlign: 'right' }}>Valor</span>
+      </div>
+
+      {/* Platform items (auto — read-only) */}
+      {platformItems.map(item => (
+        <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, background: 'rgba(124, 224, 184, 0.06)' }}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span>{item.name}</span>
+            {item.sub && <span style={{ fontSize: 10, color: theme.colors.textMuted, marginLeft: 6 }}>{item.sub}</span>}
           </div>
-
-          {/* 50/30/20 rule breakdown */}
-          <div style={{ ...panelStyle, padding: isMobile ? 16 : 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: isMobile ? 14 : 20 }}>
-              <div>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Regra 50/30/20</div>
-                <h3 className="display" style={{ fontSize: isMobile ? 18 : 22, margin: 0, color: theme.colors.text }}>
-                  Distribuicao de gastos
-                </h3>
-              </div>
-            </div>
-
-            {/* Stacked bar */}
-            {totalExpenses > 0 && (
-              <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', marginBottom: isMobile ? 16 : 24, gap: 2 }}>
-                {totalNecessidade > 0 && (
-                  <div style={{ flex: totalNecessidade, background: CATEGORY_META.necessidade.color, opacity: 0.85 }} />
-                )}
-                {totalDesejo > 0 && (
-                  <div style={{ flex: totalDesejo, background: CATEGORY_META.desejo.color, opacity: 0.85 }} />
-                )}
-                {totalEconomia > 0 && (
-                  <div style={{ flex: totalEconomia, background: CATEGORY_META.economia.color, opacity: 0.85 }} />
-                )}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? 12 : 20 }}>
-              {Object.entries(CATEGORY_META).map(([key, meta]) => {
-                const spent = key === 'necessidade' ? totalNecessidade : key === 'desejo' ? totalDesejo : totalEconomia
-                const ideal = key === 'necessidade' ? idealNecessidade : key === 'desejo' ? idealDesejo : idealEconomia
-                const pctOfIncome = totalIncome > 0 ? Math.round((spent / totalIncome) * 100) : 0
-                const overBudget = ideal > 0 && spent > ideal
-
-                return (
-                  <div key={key} style={{
-                    borderTop: `3px solid ${meta.color}`,
-                    paddingTop: 16,
-                    ...(isMobile ? { paddingBottom: 12, borderBottom: `1px solid ${theme.colors.borderSoft}` } : {}),
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Icon name={meta.icon} size={16} color={meta.color} />
-                        <span style={{ fontSize: 14, fontWeight: 500, color: theme.colors.text }}>{meta.label}</span>
-                      </div>
-                      <span className="eyebrow" style={{ color: meta.color }}>
-                        {meta.pct}% ideal
-                      </span>
-                    </div>
-
-                    <div className="display tnum" style={{ fontSize: isMobile ? 22 : 28, lineHeight: 1, color: theme.colors.text, marginBottom: 8 }}>
-                      <span style={{ fontSize: isMobile ? 12 : 14, color: theme.colors.textMuted }}>R$ </span>
-                      {Number(spent).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <span className="mono tnum" style={{ fontSize: 11, color: theme.colors.textMuted }}>
-                        {pctOfIncome}% da receita
-                      </span>
-                      {totalIncome > 0 && (
-                        <span className="mono tnum" style={{
-                          fontSize: 11,
-                          color: overBudget ? theme.colors.warm : theme.colors.mint,
-                        }}>
-                          {overBudget ? '+' : ''}{fmtBRL(spent - ideal)} {overBudget ? 'acima' : 'restante'}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Progress bar */}
-                    <div style={{ height: 4, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
-                      <div style={{
-                        height: '100%',
-                        width: ideal > 0 ? `${Math.min((spent / ideal) * 100, 100)}%` : '0%',
-                        background: overBudget ? theme.colors.warm : meta.color,
-                        transition: 'width 0.3s ease',
-                      }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Two-column: Income + Expenses */}
-      {(!isMobile || activeTab !== 'resumo') && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : '1fr 1.5fr',
-          gap: isMobile ? 16 : 20,
-        }}>
-          {/* Income panel */}
-          {(!isMobile || activeTab === 'entradas') && (
-            <div style={{ ...panelStyle, padding: isMobile ? 16 : 24 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                <div>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>Entradas</div>
-                  <h3 className="display" style={{ fontSize: isMobile ? 18 : 20, margin: 0, color: theme.colors.text }}>
-                    {fmtBRL(totalIncome)}
-                  </h3>
-                </div>
-                <button style={btnSoft} onClick={() => setShowIncomeModal(true)}>
-                  <Icon name="plus" size={14} />
-                </button>
-              </div>
-
-              {/* Platform income — PAID only (invoices/batches with comprovante) */}
-              {(platformIncome.length > 0 || legacyPayments.length > 0) && (
-                <div style={{ marginBottom: 16 }}>
-                  <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.mint }}>
-                    Recebido ({fmtBRL(totalPlatformIncome)})
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {platformIncome.map((item, i) => (
-                      <div key={`plat-${item.batch_id || item.id || i}`} style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 12px', borderRadius: 8,
-                        background: theme.colors.mintMuted,
-                      }}>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: 13, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.title || item.order_titles || 'Pagamento'}
-                          </div>
-                          <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
-                            {item.client_name || item.client_names || ''}
-                            {item.company_names ? ` · ${item.company_names}` : ''}
-                            {item.paid_at && ` · ${new Date(item.paid_at).toLocaleDateString('pt-BR')}`}
-                          </div>
-                        </div>
-                        <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint, fontWeight: 600, marginLeft: 8 }}>
-                          {fmtBRL(item.amount || item.total_amount)}
-                        </span>
-                      </div>
-                    ))}
-                    {legacyPayments.map((p, i) => (
-                      <div key={`leg-${p.id || i}`} style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 12px', borderRadius: 8,
-                        background: theme.colors.mintMuted,
-                      }}>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: 13, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {p.order_title || p.notes || 'Pagamento'}
-                          </div>
-                          <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
-                            {p.client_name || ''}{p.company_name ? ` · ${p.company_name}` : ''}
-                            {p.paid_at && ` · ${new Date(p.paid_at).toLocaleDateString('pt-BR')}`}
-                          </div>
-                        </div>
-                        <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint, fontWeight: 600, marginLeft: 8 }}>
-                          {fmtBRL(p.amount)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Pending platform work — NOT counted as income */}
-              {pendingPlatformWork.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.gold }}>
-                    Pendente de pagamento ({fmtBRL(totalPendingPlatform)})
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {pendingPlatformWork.map(o => (
-                      <div key={o.id} style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 12px', borderRadius: 8,
-                        background: theme.colors.goldMuted,
-                        opacity: 0.7,
-                      }}>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: 13, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {o.title}
-                          </div>
-                          <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>
-                            {o.client_name}{o.company_name ? ` · ${o.company_name}` : ''} · aguardando comprovante
-                          </div>
-                        </div>
-                        <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.gold, fontWeight: 600, marginLeft: 8 }}>
-                          {fmtBRL(o.editor_value)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Manual income entries */}
-              {incomeEntries.length > 0 && (
-                <div>
-                  <div className="eyebrow" style={{ marginBottom: 10, color: theme.colors.mint }}>
-                    Entradas manuais ({fmtBRL(totalManualIncome)})
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {incomeEntries.map(e => (
-                      <div key={e.id} style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 12px', borderRadius: 8,
-                        background: theme.colors.mintMuted,
-                      }}>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: 13, color: theme.colors.text }}>
-                            {e.source}
-                            {e.recurring ? <span style={{ fontSize: 10, color: theme.colors.textMuted, marginLeft: 6 }}>recorrente</span> : null}
-                          </div>
-                          {e.description && (
-                            <div style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 2 }}>{e.description}</div>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint, fontWeight: 600 }}>
-                            {fmtBRL(e.amount)}
-                          </span>
-                          <button onClick={() => handleDeleteIncome(e.id)} style={{ padding: 4, color: theme.colors.textFaint }}>
-                            <Icon name="x" size={12} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {platformIncome.length === 0 && legacyPayments.length === 0 && pendingPlatformWork.length === 0 && incomeEntries.length === 0 && (
-                <div style={{ textAlign: 'center', padding: 32, color: theme.colors.textMuted, fontSize: 13 }}>
-                  Nenhuma entrada este mes.
-                  <br />
-                  <button onClick={() => setShowIncomeModal(true)} style={{ color: theme.colors.primary, marginTop: 8, fontSize: 13 }}>
-                    Adicionar entrada
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Expenses panel */}
-          {(!isMobile || activeTab === 'saidas') && (
-            <div style={{ ...panelStyle, padding: isMobile ? 16 : 24 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-                <div>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>Saidas</div>
-                  <h3 className="display" style={{ fontSize: isMobile ? 18 : 20, margin: 0, color: theme.colors.text }}>
-                    {fmtBRL(totalExpenses)}
-                  </h3>
-                </div>
-                <button style={btnSoft} onClick={() => { setExpenseCategory('necessidade'); setShowExpenseModal(true) }}>
-                  <Icon name="plus" size={14} />
-                </button>
-              </div>
-
-              {Object.entries(CATEGORY_META).map(([cat, meta]) => {
-                const items = expensesByCategory[cat] || []
-                const catTotal = items.reduce((s, e) => s + (e.amount || 0), 0)
-                const paidCount = items.filter(e => e.paid).length
-
-                return (
-                  <div key={cat} style={{ marginBottom: 20 }}>
-                    <div style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      marginBottom: 10, paddingBottom: 8,
-                      borderBottom: `2px solid ${meta.color}`,
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Icon name={meta.icon} size={15} color={meta.color} />
-                        <span style={{ fontSize: 14, fontWeight: 600, color: theme.colors.text }}>
-                          {meta.label}
-                        </span>
-                        {items.length > 0 && (
-                          <span className="mono tnum" style={{ fontSize: 11, color: theme.colors.textMuted }}>
-                            ({paidCount}/{items.length} pagas)
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="mono tnum" style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>
-                          {fmtBRL(catTotal)}
-                        </span>
-                        <button onClick={() => { setExpenseCategory(cat); setShowExpenseModal(true) }}
-                          style={{ padding: 4, color: theme.colors.textFaint }}>
-                          <Icon name="plus" size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {items.length === 0 ? (
-                      <div style={{ fontSize: 12, color: theme.colors.textMuted, padding: '8px 0' }}>
-                        Nenhuma despesa registrada
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {items.map(exp => (
-                          <div key={exp.id} style={{
-                            display: 'flex', alignItems: 'center', gap: 10,
-                            padding: '9px 10px', borderRadius: 8,
-                            background: exp.paid ? 'transparent' : `${meta.color}08`,
-                            opacity: exp.paid ? 0.6 : 1,
-                          }}>
-                            {/* Toggle paid */}
-                            <button onClick={() => handleToggleExpense(exp.id)} style={{
-                              width: 20, height: 20, borderRadius: 5, flexShrink: 0,
-                              border: `2px solid ${exp.paid ? meta.color : theme.colors.border}`,
-                              background: exp.paid ? meta.color : 'transparent',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              cursor: 'pointer',
-                            }}>
-                              {exp.paid && <Icon name="check" size={12} color={theme.colors.bg} />}
-                            </button>
-
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{
-                                fontSize: 13, color: theme.colors.text,
-                                textDecoration: exp.paid ? 'line-through' : 'none',
-                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                              }}>
-                                {exp.name}
-                              </div>
-                              {exp.due_day && (
-                                <div style={{ fontSize: 10, color: theme.colors.textMuted, marginTop: 1 }}>
-                                  Vence dia {exp.due_day}
-                                </div>
-                              )}
-                            </div>
-
-                            <span className="mono tnum" style={{
-                              fontSize: 13, fontWeight: 500,
-                              color: exp.paid ? theme.colors.textMuted : theme.colors.text,
-                            }}>
-                              {fmtBRL(exp.amount)}
-                            </span>
-
-                            <button onClick={() => handleDeleteExpense(exp.id)}
-                              style={{ padding: 4, color: theme.colors.textFaint, flexShrink: 0 }}>
-                              <Icon name="x" size={12} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Desktop: always show income + expenses below */}
-      {!isMobile && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 14,
-        }}>
-          {/* Income sources breakdown */}
-          <div style={{ ...panelStyle, padding: 20 }}>
-            <div className="eyebrow" style={{ marginBottom: 14 }}>Fontes de receita</div>
-            {(() => {
-              // Group income by source
-              const sources = {}
-              for (const item of platformIncome) {
-                const key = item.client_name || item.client_names || 'Plataforma'
-                sources[key] = (sources[key] || 0) + (item.amount || item.total_amount || 0)
-              }
-              for (const p of legacyPayments) {
-                const key = p.client_name || 'Plataforma'
-                sources[key] = (sources[key] || 0) + (p.amount || 0)
-              }
-              for (const e of incomeEntries) {
-                sources[e.source] = (sources[e.source] || 0) + (e.amount || 0)
-              }
-              const entries = Object.entries(sources).sort((a, b) => b[1] - a[1])
-              if (entries.length === 0) {
-                return <div style={{ fontSize: 12, color: theme.colors.textMuted, padding: '12px 0' }}>Sem dados</div>
-              }
-              const maxVal = Math.max(...entries.map(e => e[1]))
-              return entries.map(([source, amount]) => (
-                <div key={source} style={{ marginBottom: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                    <span style={{ color: theme.colors.textSecondary }}>{source}</span>
-                    <span className="mono tnum" style={{ color: theme.colors.text }}>{fmtBRL(amount)}</span>
-                  </div>
-                  <div style={{ height: 4, background: theme.colors.bg, borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${(amount / maxVal) * 100}%`, background: theme.colors.mint }} />
-                  </div>
-                </div>
-              ))
-            })()}
-          </div>
-
-          {/* Expenses paid vs pending */}
-          <div style={{ ...panelStyle, padding: 20 }}>
-            <div className="eyebrow" style={{ marginBottom: 14 }}>Status das despesas</div>
-            {(() => {
-              const allExpenses = [...(expensesByCategory.necessidade || []), ...(expensesByCategory.desejo || []), ...(expensesByCategory.economia || [])]
-              const paidTotal = allExpenses.filter(e => e.paid).reduce((s, e) => s + (e.amount || 0), 0)
-              const unpaidTotal = allExpenses.filter(e => !e.paid).reduce((s, e) => s + (e.amount || 0), 0)
-              const paidCount = allExpenses.filter(e => e.paid).length
-              const unpaidCount = allExpenses.filter(e => !e.paid).length
-
-              return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: theme.colors.mint }} />
-                        <span style={{ fontSize: 13, color: theme.colors.textSecondary }}>Pagas</span>
-                      </div>
-                      <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.mint }}>{fmtBRL(paidTotal)}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: theme.colors.textMuted, paddingLeft: 16 }}>
-                      {paidCount} despesa{paidCount !== 1 ? 's' : ''}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: theme.colors.warm }} />
-                        <span style={{ fontSize: 13, color: theme.colors.textSecondary }}>Pendentes</span>
-                      </div>
-                      <span className="mono tnum" style={{ fontSize: 13, color: theme.colors.warm }}>{fmtBRL(unpaidTotal)}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: theme.colors.textMuted, paddingLeft: 16 }}>
-                      {unpaidCount} despesa{unpaidCount !== 1 ? 's' : ''}
-                    </div>
-                  </div>
-                  {totalExpenses > 0 && (
-                    <div style={{ height: 6, background: theme.colors.bg, borderRadius: 3, overflow: 'hidden', display: 'flex', gap: 2 }}>
-                      <div style={{ flex: paidTotal || 0.01, background: theme.colors.mint }} />
-                      <div style={{ flex: unpaidTotal || 0.01, background: theme.colors.warm }} />
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-          </div>
-
-          {/* Savings target */}
-          <div style={{ ...panelStyle, padding: 20 }}>
-            <div className="eyebrow" style={{ marginBottom: 14 }}>Meta de economia</div>
-            <div className="display tnum" style={{ fontSize: 28, lineHeight: 1, color: theme.colors.text, marginBottom: 8 }}>
-              <span style={{ fontSize: 14, color: theme.colors.textMuted }}>R$ </span>
-              {Number(totalEconomia).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </div>
-            <div style={{ fontSize: 12, color: theme.colors.textMuted, marginBottom: 12 }}>
-              de {fmtBRL(idealEconomia)} ideal (20%)
-            </div>
-            <div style={{ height: 8, background: theme.colors.bg, borderRadius: 4, overflow: 'hidden' }}>
-              <div style={{
-                height: '100%',
-                width: idealEconomia > 0 ? `${Math.min((totalEconomia / idealEconomia) * 100, 100)}%` : '0%',
-                background: totalEconomia >= idealEconomia ? theme.colors.mint : theme.colors.gold,
-                transition: 'width 0.3s ease',
-              }} />
-            </div>
-            <div className="mono tnum" style={{ fontSize: 11, color: theme.colors.textMuted, marginTop: 8, textAlign: 'right' }}>
-              {idealEconomia > 0 ? Math.round((totalEconomia / idealEconomia) * 100) : 0}%
-            </div>
+          <div className="mono tnum" style={{ textAlign: 'right', color: theme.colors.mint, fontWeight: 500 }}>
+            {fmtBRL(item.amount)}
           </div>
         </div>
-      )}
+      ))}
 
-      {/* Income Modal */}
-      <Modal open={showIncomeModal} onClose={() => setShowIncomeModal(false)} title="Nova entrada" subtitle="receita" width={460}>
-        <form onSubmit={handleCreateIncome} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Field label="Fonte" required>
-            <select
-              value={incomeForm.source}
-              onChange={e => setIncomeForm({ ...incomeForm, source: e.target.value })}
-              style={{ ...inputStyle, cursor: 'pointer' }}
-            >
-              {INCOME_SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </Field>
-          <Field label="Valor (R$)" required>
-            <input
-              type="number" step="0.01" min="0.01"
-              value={incomeForm.amount}
-              onChange={e => setIncomeForm({ ...incomeForm, amount: e.target.value })}
-              required placeholder="0,00" style={inputStyle}
-            />
-          </Field>
-          <Field label="Descricao">
-            <input
-              value={incomeForm.description}
-              onChange={e => setIncomeForm({ ...incomeForm, description: e.target.value })}
-              placeholder="Ex: Projeto freelance XYZ" style={inputStyle}
-            />
-          </Field>
-          <Field label="Data">
-            <input
-              type="date"
-              value={incomeForm.entry_date}
-              onChange={e => setIncomeForm({ ...incomeForm, entry_date: e.target.value })}
-              style={inputStyle}
-            />
-          </Field>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-            <button type="button" style={btnSoft} onClick={() => setShowIncomeModal(false)}>Cancelar</button>
-            <button type="submit" style={btnPrimary}>Adicionar</button>
+      {/* Pending items (not counted) */}
+      {pendingItems.map(item => (
+        <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, opacity: 0.5 }}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span>{item.title}</span>
+            <span style={{ fontSize: 10, color: theme.colors.gold, marginLeft: 6 }}>pendente</span>
           </div>
-        </form>
-      </Modal>
+          <div className="mono tnum" style={{ textAlign: 'right', color: theme.colors.gold }}>
+            {fmtBRL(item.editor_value)}
+          </div>
+        </div>
+      ))}
 
-      {/* Expense Modal */}
-      <Modal open={showExpenseModal} onClose={() => setShowExpenseModal(false)}
-        title="Nova despesa" subtitle={CATEGORY_META[expenseCategory]?.label || 'despesa'} width={460}>
-        <form onSubmit={handleCreateExpense} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Field label="Categoria" required>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {Object.entries(CATEGORY_META).map(([key, meta]) => (
-                <button key={key} type="button"
-                  onClick={() => setExpenseCategory(key)}
-                  style={{
-                    flex: 1, padding: '8px 0', fontSize: 12, borderRadius: 6,
-                    fontWeight: expenseCategory === key ? 600 : 400,
-                    color: expenseCategory === key ? meta.color : theme.colors.textMuted,
-                    background: expenseCategory === key ? `${meta.color}18` : theme.colors.bgSecondary,
-                    border: `1px solid ${expenseCategory === key ? meta.color : theme.colors.border}`,
-                    textAlign: 'center',
-                  }}
-                >
-                  {meta.label}
-                </button>
-              ))}
+      {/* Manual entries */}
+      {manualEntries.map(e => (
+        <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase }}
+          className="row-hover">
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {e.source}{e.description ? ` — ${e.description}` : ''}
+          </div>
+          <div className="mono tnum" style={{ textAlign: 'right' }}>{fmtBRL(e.amount)}</div>
+          <button onClick={() => onDelete(e.id)} style={{ padding: 0, color: theme.colors.textFaint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="x" size={11} />
+          </button>
+        </div>
+      ))}
+
+      {/* Inline new row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
+        <input
+          ref={nameRef}
+          value={draft.name}
+          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          onKeyDown={onKeyDown}
+          placeholder="Nova entrada..."
+          style={{ ...cellInput, color: theme.colors.textMuted }}
+        />
+        <input
+          value={draft.amount}
+          onChange={e => setDraft(d => ({ ...d, amount: e.target.value }))}
+          onKeyDown={onKeyDown}
+          onBlur={submit}
+          placeholder="0,00"
+          type="number" step="0.01" min="0"
+          style={{ ...cellInput, textAlign: 'right', color: theme.colors.textMuted }}
+        />
+      </div>
+
+      {/* Total */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...totalRow('#d9d9d9') }}>
+        <span>Total</span>
+        <span className="mono tnum" style={{ textAlign: 'right' }}>{fmtBRL(total)}</span>
+      </div>
+    </div>
+  )
+}
+
+/* ═══════════════════════════════════════
+   ExpenseTable — coluna de despesa
+   ═══════════════════════════════════════ */
+function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddExpense, onToggle, onDelete, onAddFixed, onDeleteFixed }) {
+  const [draft, setDraft] = useState({ name: '', amount: '', installments: '' })
+  const [fixedDraft, setFixedDraft] = useState({ name: '', amount: '' })
+  const [showFixed, setShowFixed] = useState(false)
+  const nameRef = useRef(null)
+  const fixedNameRef = useRef(null)
+
+  async function submitExpense() {
+    if (!draft.name.trim() || !draft.amount) return
+    try {
+      await onAddExpense(draft.name.trim(), parseFloat(draft.amount), draft.installments ? parseInt(draft.installments) : 0)
+      setDraft({ name: '', amount: '', installments: '' })
+      nameRef.current?.focus()
+    } catch (err) { alert(err.message) }
+  }
+
+  async function submitFixed() {
+    if (!fixedDraft.name.trim() || !fixedDraft.amount) return
+    try {
+      await onAddFixed(fixedDraft.name.trim(), parseFloat(fixedDraft.amount))
+      setFixedDraft({ name: '', amount: '' })
+      fixedNameRef.current?.focus()
+    } catch (err) { alert(err.message) }
+  }
+
+  function onKeyDown(e, fn) {
+    if (e.key === 'Enter') { e.preventDefault(); fn() }
+  }
+
+  return (
+    <div style={{ ...panelStyle, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...headerCell(meta.bg) }}>
+        <span style={{ color: meta.color }}>{meta.label}</span>
+        <span style={{ textAlign: 'right', color: meta.color }}>Valor</span>
+      </div>
+
+      {/* Fixed costs section */}
+      {fixedCosts.length > 0 && fixedCosts.map(fc => (
+        <div key={`fc-${fc.id}`}
+          style={{ display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase, background: `${meta.color}08` }}
+          className="row-hover">
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span>{fc.name}</span>
+            <span style={{ fontSize: 9, color: meta.color, marginLeft: 6, textTransform: 'uppercase', fontWeight: 600 }}>fixo</span>
+          </div>
+          <div className="mono tnum" style={{ textAlign: 'right' }}>{fmtBRL(fc.amount)}</div>
+          <button onClick={() => onDeleteFixed(fc.id)} style={{ padding: 0, color: theme.colors.textFaint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="x" size={11} />
+          </button>
+        </div>
+      ))}
+
+      {/* Variable expenses */}
+      {items.map(exp => (
+        <div key={exp.id}
+          style={{
+            display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase,
+            opacity: exp.paid ? 0.5 : 1,
+            textDecoration: exp.paid ? 'line-through' : 'none',
+          }}
+          className="row-hover">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+            <button onClick={() => onToggle(exp.id)} style={{
+              width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+              border: `1.5px solid ${exp.paid ? meta.color : theme.colors.border}`,
+              background: exp.paid ? meta.color : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
+            }}>
+              {exp.paid && <Icon name="check" size={9} color="#fff" />}
+            </button>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {exp.name}
+              {exp.installment_total > 0 && (
+                <span style={{ fontSize: 10, color: meta.color, marginLeft: 4 }}>
+                  {exp.installment_current}/{exp.installment_total}
+                </span>
+              )}
+            </span>
+          </div>
+          <div className="mono tnum" style={{ textAlign: 'right' }}>{fmtBRL(exp.amount)}</div>
+          <button onClick={() => onDelete(exp.id)} style={{ padding: 0, color: theme.colors.textFaint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="x" size={11} />
+          </button>
+        </div>
+      ))}
+
+      {/* Inline new expense row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            ref={nameRef}
+            value={draft.name}
+            onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+            onKeyDown={e => onKeyDown(e, submitExpense)}
+            placeholder="Nova despesa..."
+            style={{ ...cellInput, color: theme.colors.textMuted, flex: 1 }}
+          />
+          {draft.name && (
+            <input
+              value={draft.installments}
+              onChange={e => setDraft(d => ({ ...d, installments: e.target.value }))}
+              onKeyDown={e => onKeyDown(e, submitExpense)}
+              placeholder="Parcelas"
+              type="number" min="2" max="48"
+              title="Numero de parcelas (deixe vazio para pagamento unico)"
+              style={{ ...cellInput, color: theme.colors.textMuted, width: 55, textAlign: 'center', fontSize: 11 }}
+            />
+          )}
+        </div>
+        <input
+          value={draft.amount}
+          onChange={e => setDraft(d => ({ ...d, amount: e.target.value }))}
+          onKeyDown={e => onKeyDown(e, submitExpense)}
+          onBlur={submitExpense}
+          placeholder="0,00"
+          type="number" step="0.01" min="0"
+          style={{ ...cellInput, textAlign: 'right', color: theme.colors.textMuted }}
+        />
+      </div>
+
+      {/* Total */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...totalRow(meta.bg) }}>
+        <span style={{ color: meta.color }}>Total</span>
+        <span className="mono tnum" style={{ textAlign: 'right', color: meta.color }}>{fmtBRL(total)}</span>
+      </div>
+
+      {/* Fixed costs toggle */}
+      <div style={{ borderTop: `1px solid ${theme.colors.borderSoft}` }}>
+        <button onClick={() => setShowFixed(s => !s)} style={{
+          width: '100%', padding: '8px 10px', fontSize: 11, color: theme.colors.textMuted,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: theme.colors.bgSecondary,
+        }}>
+          <span>Custos fixos ({fixedCosts.length})</span>
+          <Icon name={showFixed ? 'chevronDown' : 'chevronRight'} size={12} />
+        </button>
+
+        {showFixed && (
+          <div style={{ background: theme.colors.bgSecondary, borderTop: `1px solid ${theme.colors.borderSoft}` }}>
+            {/* Inline add fixed */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', padding: '6px 10px' }}>
+              <input
+                ref={fixedNameRef}
+                value={fixedDraft.name}
+                onChange={e => setFixedDraft(d => ({ ...d, name: e.target.value }))}
+                onKeyDown={e => onKeyDown(e, submitFixed)}
+                placeholder="Nome do custo fixo..."
+                style={{ ...cellInput, color: theme.colors.textMuted, fontSize: 12 }}
+              />
+              <input
+                value={fixedDraft.amount}
+                onChange={e => setFixedDraft(d => ({ ...d, amount: e.target.value }))}
+                onKeyDown={e => onKeyDown(e, submitFixed)}
+                onBlur={submitFixed}
+                placeholder="0,00"
+                type="number" step="0.01" min="0"
+                style={{ ...cellInput, textAlign: 'right', color: theme.colors.textMuted, fontSize: 12 }}
+              />
             </div>
-          </Field>
-          <Field label="Nome" required>
-            <input
-              value={expenseForm.name}
-              onChange={e => setExpenseForm({ ...expenseForm, name: e.target.value })}
-              required placeholder="Ex: Aluguel, Netflix, Reserva..." style={inputStyle}
-            />
-          </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="Valor (R$)" required>
-              <input
-                type="number" step="0.01" min="0.01"
-                value={expenseForm.amount}
-                onChange={e => setExpenseForm({ ...expenseForm, amount: e.target.value })}
-                required placeholder="0,00" style={inputStyle}
-              />
-            </Field>
-            <Field label="Dia de vencimento">
-              <input
-                type="number" min="1" max="31"
-                value={expenseForm.due_day}
-                onChange={e => setExpenseForm({ ...expenseForm, due_day: e.target.value })}
-                placeholder="Ex: 10" style={inputStyle}
-              />
-            </Field>
           </div>
-          <Field label="Data">
-            <input
-              type="date"
-              value={expenseForm.entry_date}
-              onChange={e => setExpenseForm({ ...expenseForm, entry_date: e.target.value })}
-              style={inputStyle}
-            />
-          </Field>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-            <button type="button" style={btnSoft} onClick={() => setShowExpenseModal(false)}>Cancelar</button>
-            <button type="submit" style={btnPrimary}>Adicionar</button>
-          </div>
-        </form>
-      </Modal>
+        )}
+      </div>
     </div>
   )
 }

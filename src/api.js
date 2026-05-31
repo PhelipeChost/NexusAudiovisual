@@ -256,6 +256,9 @@ const api = {
     updateExpense: (id, data) => request(`/personal-finance/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     toggleExpense: (id) => request(`/personal-finance/expenses/${id}/toggle`, { method: 'PUT' }),
     deleteExpense: (id) => request(`/personal-finance/expenses/${id}`, { method: 'DELETE' }),
+    createFixedCost: (data) => request('/personal-finance/fixed-costs', { method: 'POST', body: JSON.stringify(data) }),
+    updateFixedCost: (id, data) => request(`/personal-finance/fixed-costs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteFixedCost: (id) => request(`/personal-finance/fixed-costs/${id}`, { method: 'DELETE' }),
   },
 }
 

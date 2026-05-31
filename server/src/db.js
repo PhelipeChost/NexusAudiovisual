@@ -665,6 +665,28 @@ async function initDb() {
       due_day INTEGER,
       paid INTEGER DEFAULT 0,
       entry_date DATE DEFAULT (DATE('now')),
+      installment_total INTEGER DEFAULT 0,
+      installment_current INTEGER DEFAULT 0,
+      installment_group TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `)
+
+  // Migrate: add installment columns to personal_expenses
+  try { db.run('ALTER TABLE personal_expenses ADD COLUMN installment_total INTEGER DEFAULT 0') } catch {}
+  try { db.run('ALTER TABLE personal_expenses ADD COLUMN installment_current INTEGER DEFAULT 0') } catch {}
+  try { db.run('ALTER TABLE personal_expenses ADD COLUMN installment_group TEXT') } catch {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS personal_fixed_costs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      category TEXT NOT NULL CHECK(category IN ('necessidade','desejo','economia')),
+      name TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      due_day INTEGER,
+      active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     )

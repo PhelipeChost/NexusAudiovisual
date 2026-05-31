@@ -4087,12 +4087,19 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
 
   const totalManualIncome = incomeEntries.reduce((s, e) => s + (e.amount || 0), 0)
 
-  // Expenses
+  // Expenses (variable/one-time + installments for this month)
   const expenses = all(`
     SELECT * FROM personal_expenses
     WHERE user_id = ? AND entry_date BETWEEN ? AND ?
-    ORDER BY category, entry_date DESC
+    ORDER BY category, created_at ASC
   `, [uid, startDate, endDate])
+
+  // Fixed costs (recurring monthly)
+  const fixedCosts = all(`
+    SELECT * FROM personal_fixed_costs
+    WHERE user_id = ? AND active = 1
+    ORDER BY category, created_at ASC
+  `, [uid])
 
   const expensesByCategory = {
     necessidade: expenses.filter(e => e.category === 'necessidade'),
@@ -4100,9 +4107,18 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
     economia: expenses.filter(e => e.category === 'economia'),
   }
 
+  const fixedByCategory = {
+    necessidade: fixedCosts.filter(e => e.category === 'necessidade'),
+    desejo: fixedCosts.filter(e => e.category === 'desejo'),
+    economia: fixedCosts.filter(e => e.category === 'economia'),
+  }
+
   const totalNecessidade = expensesByCategory.necessidade.reduce((s, e) => s + (e.amount || 0), 0)
+    + fixedByCategory.necessidade.reduce((s, e) => s + (e.amount || 0), 0)
   const totalDesejo = expensesByCategory.desejo.reduce((s, e) => s + (e.amount || 0), 0)
+    + fixedByCategory.desejo.reduce((s, e) => s + (e.amount || 0), 0)
   const totalEconomia = expensesByCategory.economia.reduce((s, e) => s + (e.amount || 0), 0)
+    + fixedByCategory.economia.reduce((s, e) => s + (e.amount || 0), 0)
   const totalExpenses = totalNecessidade + totalDesejo + totalEconomia
 
   const totalIncome = totalPlatformIncome + totalManualIncome
@@ -4124,6 +4140,7 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
     pendingPlatformWork,
     incomeEntries,
     expensesByCategory,
+    fixedByCategory,
   })
 })
 
@@ -4169,9 +4186,9 @@ router.delete('/personal-finance/income/:id', authMiddleware, requireRole('gesto
   res.json({ success: true })
 })
 
-// Create personal expense
+// Create personal expense (supports installments)
 router.post('/personal-finance/expenses', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
-  const { category, name, amount, due_day, paid, entry_date } = req.body
+  const { category, name, amount, due_day, paid, entry_date, installments } = req.body
   if (!category || !name || !amount) {
     return res.status(400).json({ error: 'Categoria, nome e valor são obrigatórios' })
   }
@@ -4184,13 +4201,34 @@ router.post('/personal-finance/expenses', authMiddleware, requireRole('gestor', 
     return res.status(400).json({ error: 'Valor deve ser maior que zero' })
   }
 
-  const result = run(
-    'INSERT INTO personal_expenses (user_id, category, name, amount, due_day, paid, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [req.user.id, category, name, parsedAmount, due_day || null, paid ? 1 : 0, entry_date || new Date().toISOString().substring(0, 10)]
-  )
+  const numInstallments = installments ? parseInt(installments) : 0
 
-  const expense = get('SELECT * FROM personal_expenses WHERE id = ?', [result.lastInsertRowid])
-  res.json(expense)
+  if (numInstallments > 1) {
+    // Create one expense per installment month
+    const installmentAmount = Math.round((parsedAmount / numInstallments) * 100) / 100
+    const groupId = crypto.randomBytes(8).toString('hex')
+    const baseDate = entry_date || new Date().toISOString().substring(0, 10)
+    const [baseY, baseM] = baseDate.split('-').map(Number)
+    const created = []
+
+    for (let i = 0; i < numInstallments; i++) {
+      const d = new Date(baseY, baseM - 1 + i, 1)
+      const installDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${baseDate.split('-')[2] || '01'}`
+      const result = run(
+        'INSERT INTO personal_expenses (user_id, category, name, amount, due_day, paid, entry_date, installment_total, installment_current, installment_group) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [req.user.id, category, name, installmentAmount, due_day || null, 0, installDate, numInstallments, i + 1, groupId]
+      )
+      created.push(get('SELECT * FROM personal_expenses WHERE id = ?', [result.lastInsertRowid]))
+    }
+    res.json(created[0]) // return first installment
+  } else {
+    const result = run(
+      'INSERT INTO personal_expenses (user_id, category, name, amount, due_day, paid, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [req.user.id, category, name, parsedAmount, due_day || null, paid ? 1 : 0, entry_date || new Date().toISOString().substring(0, 10)]
+    )
+    const expense = get('SELECT * FROM personal_expenses WHERE id = ?', [result.lastInsertRowid])
+    res.json(expense)
+  }
 })
 
 // Update personal expense
@@ -4224,6 +4262,40 @@ router.delete('/personal-finance/expenses/:id', authMiddleware, requireRole('ges
   const expense = get('SELECT * FROM personal_expenses WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
   if (!expense) return res.status(404).json({ error: 'Despesa não encontrada' })
   run('DELETE FROM personal_expenses WHERE id = ?', [req.params.id])
+  res.json({ success: true })
+})
+
+// ============ PERSONAL FIXED COSTS ============
+
+router.post('/personal-finance/fixed-costs', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { category, name, amount, due_day } = req.body
+  if (!category || !name || !amount) return res.status(400).json({ error: 'Categoria, nome e valor são obrigatórios' })
+  if (!['necessidade', 'desejo', 'economia'].includes(category)) return res.status(400).json({ error: 'Categoria inválida' })
+
+  const parsedAmount = parseFloat(amount)
+  if (isNaN(parsedAmount) || parsedAmount <= 0) return res.status(400).json({ error: 'Valor deve ser maior que zero' })
+
+  const result = run(
+    'INSERT INTO personal_fixed_costs (user_id, category, name, amount, due_day) VALUES (?, ?, ?, ?, ?)',
+    [req.user.id, category, name, parsedAmount, due_day || null]
+  )
+  res.json(get('SELECT * FROM personal_fixed_costs WHERE id = ?', [result.lastInsertRowid]))
+})
+
+router.put('/personal-finance/fixed-costs/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { name, amount, due_day, category } = req.body
+  const fc = get('SELECT * FROM personal_fixed_costs WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!fc) return res.status(404).json({ error: 'Custo fixo não encontrado' })
+
+  run('UPDATE personal_fixed_costs SET name = COALESCE(?, name), amount = COALESCE(?, amount), due_day = COALESCE(?, due_day), category = COALESCE(?, category) WHERE id = ?',
+    [name || null, amount ? parseFloat(amount) : null, due_day, category || null, req.params.id])
+  res.json(get('SELECT * FROM personal_fixed_costs WHERE id = ?', [req.params.id]))
+})
+
+router.delete('/personal-finance/fixed-costs/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const fc = get('SELECT * FROM personal_fixed_costs WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!fc) return res.status(404).json({ error: 'Custo fixo não encontrado' })
+  run('DELETE FROM personal_fixed_costs WHERE id = ?', [req.params.id])
   res.json({ success: true })
 })
 
