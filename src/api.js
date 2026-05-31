@@ -246,6 +246,17 @@ const api = {
   activity: {
     list: () => request('/activity'),
   },
+
+  personalFinance: {
+    get: (month) => request(`/personal-finance?month=${month}`),
+    createIncome: (data) => request('/personal-finance/income', { method: 'POST', body: JSON.stringify(data) }),
+    updateIncome: (id, data) => request(`/personal-finance/income/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteIncome: (id) => request(`/personal-finance/income/${id}`, { method: 'DELETE' }),
+    createExpense: (data) => request('/personal-finance/expenses', { method: 'POST', body: JSON.stringify(data) }),
+    updateExpense: (id, data) => request(`/personal-finance/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    toggleExpense: (id) => request(`/personal-finance/expenses/${id}/toggle`, { method: 'PUT' }),
+    deleteExpense: (id) => request(`/personal-finance/expenses/${id}`, { method: 'DELETE' }),
+  },
 }
 
 export default api

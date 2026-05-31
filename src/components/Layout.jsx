@@ -20,6 +20,7 @@ const ALL_NAV_ITEMS = [
   { path: '/dashboard/team', label: 'Equipe',      icon: 'team', roles: ['gestor'] },
   { path: '/dashboard/financial', label: 'Financeiro', icon: 'financial', roles: ['gestor'] },
   { path: '/dashboard/contracts', label: 'Contratos', icon: 'briefcase', roles: ['gestor'] },
+  { path: '/dashboard/personal-finance', label: 'Pessoal', icon: 'financial', roles: ['gestor', 'editor'] },
   { path: '/dashboard/calendar', label: 'Calendario', icon: 'calendar', roles: ['gestor'] },
   { path: '/dashboard/reports', label: 'Relatorios', icon: 'briefcase', roles: ['gestor'] },
   { path: '/dashboard/settings', label: 'Configuracoes', icon: 'settings', roles: ['gestor', 'editor', 'cliente'] },
@@ -59,6 +60,7 @@ const PAGE_TITLES = {
   '/dashboard/admin': 'Administracao',
   '/dashboard/settings': 'Configuracoes',
   '/dashboard/contracts': 'Contratos',
+  '/dashboard/personal-finance': 'Pessoal',
   '/dashboard/editor-financial': 'Financeiro',
   '/dashboard/editor-report': 'Relatorio',
 }

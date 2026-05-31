@@ -639,6 +639,37 @@ async function initDb() {
     expires_at DATETIME
   )`)
 
+  // ============ PERSONAL FINANCE (painel financeiro pessoal) ============
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS personal_income (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      source TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      description TEXT,
+      entry_date DATE DEFAULT (DATE('now')),
+      recurring INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS personal_expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      category TEXT NOT NULL CHECK(category IN ('necessidade','desejo','economia')),
+      name TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      due_day INTEGER,
+      paid INTEGER DEFAULT 0,
+      entry_date DATE DEFAULT (DATE('now')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `)
+
   // Seed default plan if none exists
   const planCount = db.exec("SELECT COUNT(*) FROM plans")[0]?.values[0][0] || 0
   if (planCount === 0) {

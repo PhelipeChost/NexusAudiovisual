@@ -3937,4 +3937,176 @@ router.get('/contracts/validations/:id', authMiddleware, (req, res) => {
   res.json(v)
 })
 
+// ============ PERSONAL FINANCE (painel financeiro pessoal) ============
+
+// Get personal finance overview for a month
+router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const uid = req.user.id
+  const month = req.query.month // YYYY-MM
+  if (!month) return res.status(400).json({ error: 'Parâmetro month obrigatório (YYYY-MM)' })
+
+  const startDate = `${month}-01`
+  const endDate = `${month}-31`
+
+  // Platform income: sum of editor_value from completed orders this month
+  // (orders where the user is assigned as editor AND column is "Finalizado")
+  const platformIncome = all(`
+    SELECT o.id, o.title, o.editor_value, o.updated_at, c.name as client_name, co.name as company_name
+    FROM orders o
+    LEFT JOIN clients c ON c.id = o.client_id
+    LEFT JOIN companies co ON co.id = o.company_id
+    JOIN kanban_columns kc ON kc.id = o.column_id
+    WHERE o.editor_id = ? AND kc.name = 'Finalizado'
+    AND DATE(o.updated_at) BETWEEN ? AND ?
+    ORDER BY o.updated_at DESC
+  `, [uid, startDate, endDate])
+
+  const totalPlatformIncome = platformIncome.reduce((s, o) => s + (o.editor_value || 0), 0)
+
+  // Manual income entries
+  const incomeEntries = all(`
+    SELECT * FROM personal_income
+    WHERE user_id = ? AND entry_date BETWEEN ? AND ?
+    ORDER BY entry_date DESC
+  `, [uid, startDate, endDate])
+
+  const totalManualIncome = incomeEntries.reduce((s, e) => s + (e.amount || 0), 0)
+
+  // Expenses
+  const expenses = all(`
+    SELECT * FROM personal_expenses
+    WHERE user_id = ? AND entry_date BETWEEN ? AND ?
+    ORDER BY category, entry_date DESC
+  `, [uid, startDate, endDate])
+
+  const expensesByCategory = {
+    necessidade: expenses.filter(e => e.category === 'necessidade'),
+    desejo: expenses.filter(e => e.category === 'desejo'),
+    economia: expenses.filter(e => e.category === 'economia'),
+  }
+
+  const totalNecessidade = expensesByCategory.necessidade.reduce((s, e) => s + (e.amount || 0), 0)
+  const totalDesejo = expensesByCategory.desejo.reduce((s, e) => s + (e.amount || 0), 0)
+  const totalEconomia = expensesByCategory.economia.reduce((s, e) => s + (e.amount || 0), 0)
+  const totalExpenses = totalNecessidade + totalDesejo + totalEconomia
+
+  const totalIncome = totalPlatformIncome + totalManualIncome
+  const balance = totalIncome - totalExpenses
+
+  res.json({
+    month,
+    totalIncome,
+    totalPlatformIncome,
+    totalManualIncome,
+    totalExpenses,
+    totalNecessidade,
+    totalDesejo,
+    totalEconomia,
+    balance,
+    platformIncome,
+    incomeEntries,
+    expensesByCategory,
+  })
+})
+
+// Create personal income entry
+router.post('/personal-finance/income', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { source, amount, description, entry_date, recurring } = req.body
+  if (!source || !amount) return res.status(400).json({ error: 'Fonte e valor são obrigatórios' })
+
+  const parsedAmount = parseFloat(amount)
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Valor deve ser maior que zero' })
+  }
+
+  const result = run(
+    'INSERT INTO personal_income (user_id, source, amount, description, entry_date, recurring) VALUES (?, ?, ?, ?, ?, ?)',
+    [req.user.id, source, parsedAmount, description || null, entry_date || new Date().toISOString().substring(0, 10), recurring ? 1 : 0]
+  )
+
+  const entry = get('SELECT * FROM personal_income WHERE id = ?', [result.lastInsertRowid])
+  res.json(entry)
+})
+
+// Update personal income entry
+router.put('/personal-finance/income/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { source, amount, description, entry_date, recurring } = req.body
+  const entry = get('SELECT * FROM personal_income WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!entry) return res.status(404).json({ error: 'Entrada não encontrada' })
+
+  run(
+    'UPDATE personal_income SET source = COALESCE(?, source), amount = COALESCE(?, amount), description = COALESCE(?, description), entry_date = COALESCE(?, entry_date), recurring = COALESCE(?, recurring) WHERE id = ?',
+    [source || null, amount ? parseFloat(amount) : null, description, entry_date || null, recurring !== undefined ? (recurring ? 1 : 0) : null, req.params.id]
+  )
+
+  const updated = get('SELECT * FROM personal_income WHERE id = ?', [req.params.id])
+  res.json(updated)
+})
+
+// Delete personal income entry
+router.delete('/personal-finance/income/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const entry = get('SELECT * FROM personal_income WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!entry) return res.status(404).json({ error: 'Entrada não encontrada' })
+  run('DELETE FROM personal_income WHERE id = ?', [req.params.id])
+  res.json({ success: true })
+})
+
+// Create personal expense
+router.post('/personal-finance/expenses', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { category, name, amount, due_day, paid, entry_date } = req.body
+  if (!category || !name || !amount) {
+    return res.status(400).json({ error: 'Categoria, nome e valor são obrigatórios' })
+  }
+  if (!['necessidade', 'desejo', 'economia'].includes(category)) {
+    return res.status(400).json({ error: 'Categoria inválida' })
+  }
+
+  const parsedAmount = parseFloat(amount)
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Valor deve ser maior que zero' })
+  }
+
+  const result = run(
+    'INSERT INTO personal_expenses (user_id, category, name, amount, due_day, paid, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [req.user.id, category, name, parsedAmount, due_day || null, paid ? 1 : 0, entry_date || new Date().toISOString().substring(0, 10)]
+  )
+
+  const expense = get('SELECT * FROM personal_expenses WHERE id = ?', [result.lastInsertRowid])
+  res.json(expense)
+})
+
+// Update personal expense
+router.put('/personal-finance/expenses/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { category, name, amount, due_day, paid, entry_date } = req.body
+  const expense = get('SELECT * FROM personal_expenses WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!expense) return res.status(404).json({ error: 'Despesa não encontrada' })
+
+  run(
+    'UPDATE personal_expenses SET category = COALESCE(?, category), name = COALESCE(?, name), amount = COALESCE(?, amount), due_day = COALESCE(?, due_day), paid = COALESCE(?, paid), entry_date = COALESCE(?, entry_date) WHERE id = ?',
+    [category || null, name || null, amount ? parseFloat(amount) : null, due_day, paid !== undefined ? (paid ? 1 : 0) : null, entry_date || null, req.params.id]
+  )
+
+  const updated = get('SELECT * FROM personal_expenses WHERE id = ?', [req.params.id])
+  res.json(updated)
+})
+
+// Toggle expense paid status
+router.put('/personal-finance/expenses/:id/toggle', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const expense = get('SELECT * FROM personal_expenses WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!expense) return res.status(404).json({ error: 'Despesa não encontrada' })
+
+  run('UPDATE personal_expenses SET paid = ? WHERE id = ?', [expense.paid ? 0 : 1, req.params.id])
+
+  const updated = get('SELECT * FROM personal_expenses WHERE id = ?', [req.params.id])
+  res.json(updated)
+})
+
+// Delete personal expense
+router.delete('/personal-finance/expenses/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const expense = get('SELECT * FROM personal_expenses WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!expense) return res.status(404).json({ error: 'Despesa não encontrada' })
+  run('DELETE FROM personal_expenses WHERE id = ?', [req.params.id])
+  res.json({ success: true })
+})
+
 export default router

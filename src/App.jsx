@@ -22,6 +22,7 @@ import Contracts from './pages/Contracts'
 import ContractSign from './pages/ContractSign'
 import GovBRResult from './pages/GovBRResult'
 import AdminDashboard from './pages/AdminDashboard'
+import PersonalFinance from './pages/PersonalFinance'
 import LandingPage from './pages/LandingPage'
 
 // ProtectedRoute — resilient to transient auth-state glitches during navigation.
@@ -102,6 +103,7 @@ const AppRoutes = React.memo(function AppRoutes() {
         <Route path="calendar" element={<Calendar />} />
         <Route path="reports" element={<EditorReport />} />
         <Route path="contracts" element={<Contracts />} />
+        <Route path="personal-finance" element={<PersonalFinance />} />
         <Route path="editor-financial" element={<EditorFinancial />} />
         <Route path="editor-report" element={<EditorMyReport />} />
         <Route path="admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
