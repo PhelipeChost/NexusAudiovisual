@@ -218,14 +218,13 @@ export default function PersonalFinance() {
         </div>
       )}
 
-      {/* ── Spreadsheet Tables ── */}
+      {/* ── Row 1: Entradas + Avulsas (fluxo do dia a dia) ── */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : 'repeat(5, 1fr)',
-        gap: isMobile ? 0 : 12,
+        gridTemplateColumns: isMobile ? '1fr' : '3fr 2fr',
+        gap: isMobile ? 0 : 14,
         alignItems: 'start',
       }}>
-        {/* Entradas column */}
         {(!isMobile || mobileTab === 'entradas') && (
           <IncomeTable
             platformItems={allPlatformItems}
@@ -244,7 +243,31 @@ export default function PersonalFinance() {
           />
         )}
 
-        {/* Necessidades / Desejos / Economias columns */}
+        {(!isMobile || mobileTab === 'avulsa') && (
+          <AvulsaTable
+            meta={AVULSA_META}
+            items={avulsas}
+            total={totalAvulsas}
+            month={month}
+            onAdd={async (name, amount) => {
+              await api.personalFinance.createAvulsa({
+                name, amount,
+                entry_date: new Date().toISOString().substring(0, 10),
+              })
+              load()
+            }}
+            onDelete={async (id) => { await api.personalFinance.deleteAvulsa(id); load() }}
+          />
+        )}
+      </div>
+
+      {/* ── Row 2: Necessidades + Desejos + Economias (regra 50/30/20) ── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
+        gap: isMobile ? 0 : 14,
+        alignItems: 'start',
+      }}>
         {Object.entries(CAT).map(([cat, meta]) => {
           if (isMobile && mobileTab !== cat) return null
           const items = expensesByCategory[cat] || []
@@ -279,24 +302,6 @@ export default function PersonalFinance() {
             />
           )
         })}
-
-        {/* Compras avulsas */}
-        {(!isMobile || mobileTab === 'avulsa') && (
-          <AvulsaTable
-            meta={AVULSA_META}
-            items={avulsas}
-            total={totalAvulsas}
-            month={month}
-            onAdd={async (name, amount) => {
-              await api.personalFinance.createAvulsa({
-                name, amount,
-                entry_date: new Date().toISOString().substring(0, 10),
-              })
-              load()
-            }}
-            onDelete={async (id) => { await api.personalFinance.deleteAvulsa(id); load() }}
-          />
-        )}
       </div>
     </div>
   )
@@ -325,13 +330,13 @@ function IncomeTable({ platformItems, pendingItems, manualEntries, total, totalP
   return (
     <div style={{ ...panelStyle, overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...headerCell('#d9d9d9') }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...headerCell('#d9d9d9') }}>
         <span>Entradas</span><span style={{ textAlign: 'right' }}>Valor</span>
       </div>
 
       {/* Platform items (auto — read-only) */}
       {platformItems.map(item => (
-        <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, background: 'rgba(124, 224, 184, 0.06)' }}>
+        <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...cellBase, background: 'rgba(124, 224, 184, 0.06)' }}>
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <span>{item.name}</span>
             {item.sub && <span style={{ fontSize: 10, color: theme.colors.textMuted, marginLeft: 6 }}>{item.sub}</span>}
@@ -344,7 +349,7 @@ function IncomeTable({ platformItems, pendingItems, manualEntries, total, totalP
 
       {/* Pending items (not counted) */}
       {pendingItems.map(item => (
-        <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, opacity: 0.5 }}>
+        <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...cellBase, opacity: 0.5 }}>
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <span>{item.title}</span>
             <span style={{ fontSize: 10, color: theme.colors.gold, marginLeft: 6 }}>pendente</span>
@@ -357,7 +362,7 @@ function IncomeTable({ platformItems, pendingItems, manualEntries, total, totalP
 
       {/* Manual entries */}
       {manualEntries.map(e => (
-        <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase }}
+        <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 20px', ...cellBase }}
           className="row-hover">
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {e.source}{e.description ? ` — ${e.description}` : ''}
@@ -370,7 +375,7 @@ function IncomeTable({ platformItems, pendingItems, manualEntries, total, totalP
       ))}
 
       {/* Inline new row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
         <input
           ref={nameRef}
           value={draft.name}
@@ -391,7 +396,7 @@ function IncomeTable({ platformItems, pendingItems, manualEntries, total, totalP
       </div>
 
       {/* Total */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...totalRow('#d9d9d9') }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...totalRow('#d9d9d9') }}>
         <span>Total</span>
         <span className="mono tnum" style={{ textAlign: 'right' }}>{fmtBRL(total)}</span>
       </div>
@@ -434,7 +439,7 @@ function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddEx
   return (
     <div style={{ ...panelStyle, overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...headerCell(meta.bg) }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...headerCell(meta.bg) }}>
         <span style={{ color: meta.color }}>{meta.label}</span>
         <span style={{ textAlign: 'right', color: meta.color }}>Valor</span>
       </div>
@@ -442,7 +447,7 @@ function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddEx
       {/* Fixed costs section */}
       {fixedCosts.length > 0 && fixedCosts.map(fc => (
         <div key={`fc-${fc.id}`}
-          style={{ display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase, background: `${meta.color}08` }}
+          style={{ display: 'grid', gridTemplateColumns: '1fr 110px 20px', ...cellBase, background: `${meta.color}08` }}
           className="row-hover">
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <span>{fc.name}</span>
@@ -459,7 +464,7 @@ function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddEx
       {items.map(exp => (
         <div key={exp.id}
           style={{
-            display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase,
+            display: 'grid', gridTemplateColumns: '1fr 110px 20px', ...cellBase,
             opacity: exp.paid ? 0.5 : 1,
             textDecoration: exp.paid ? 'line-through' : 'none',
           }}
@@ -490,7 +495,7 @@ function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddEx
       ))}
 
       {/* Inline new expense row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input
             ref={nameRef}
@@ -524,7 +529,7 @@ function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddEx
       </div>
 
       {/* Total */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...totalRow(meta.bg) }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...totalRow(meta.bg) }}>
         <span style={{ color: meta.color }}>Total</span>
         <span className="mono tnum" style={{ textAlign: 'right', color: meta.color }}>{fmtBRL(total)}</span>
       </div>
@@ -543,7 +548,7 @@ function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddEx
         {showFixed && (
           <div style={{ background: theme.colors.bgSecondary, borderTop: `1px solid ${theme.colors.borderSoft}` }}>
             {/* Inline add fixed */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', padding: '6px 10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', padding: '6px 10px' }}>
               <input
                 ref={fixedNameRef}
                 value={fixedDraft.name}
@@ -602,7 +607,7 @@ function AvulsaTable({ meta, items, total, onAdd, onDelete }) {
   return (
     <div style={{ ...panelStyle, overflow: 'hidden' }}>
       {/* Header */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...headerCell(meta.bg) }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...headerCell(meta.bg) }}>
         <span style={{ color: meta.color }}>{meta.label}</span>
         <span style={{ textAlign: 'right', color: meta.color }}>Valor</span>
       </div>
@@ -622,7 +627,7 @@ function AvulsaTable({ meta, items, total, onAdd, onDelete }) {
           )}
           {byDay[day].map(av => (
             <div key={av.id}
-              style={{ display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase }}
+              style={{ display: 'grid', gridTemplateColumns: '1fr 110px 20px', ...cellBase }}
               className="row-hover">
               <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {av.name}
@@ -637,7 +642,7 @@ function AvulsaTable({ meta, items, total, onAdd, onDelete }) {
       ))}
 
       {/* Inline new row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
         <input
           ref={nameRef}
           value={draft.name}
@@ -658,7 +663,7 @@ function AvulsaTable({ meta, items, total, onAdd, onDelete }) {
       </div>
 
       {/* Total */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...totalRow(meta.bg) }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', ...totalRow(meta.bg) }}>
         <span style={{ color: meta.color }}>Total</span>
         <span className="mono tnum" style={{ textAlign: 'right', color: meta.color }}>{fmtBRL(total)}</span>
       </div>
