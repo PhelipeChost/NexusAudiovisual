@@ -238,9 +238,18 @@ function OverviewTab({ month, isMobile: isMobileProp }) {
           headers={['Editor', 'Trab.', 'Total', 'Pago', 'Pendente']}
           rows={data.perEditor.map(e => ({
             cells: [
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }} key="n">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: e.editor_active === 0 ? 0.7 : 1 }} key="n">
                 <Avatar name={e.editor_name} size={22} />
                 <span style={{ fontSize: 13, color: theme.colors.text }}>{e.editor_name}</span>
+                {e.editor_active === 0 && (
+                  <span style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 4,
+                    background: theme.colors.bgSecondary, color: theme.colors.textMuted,
+                    fontFamily: theme.fonts.mono, letterSpacing: '0.04em', textTransform: 'uppercase',
+                  }}>
+                    removido
+                  </span>
+                )}
               </div>,
               <span className="mono tnum">{e.total_orders}</span>,
               <span className="mono tnum" style={{ fontWeight: 600 }}>{fmtBRL(e.total_value, true)}</span>,

@@ -362,11 +362,18 @@ async function initDb() {
       role TEXT DEFAULT 'editor',
       status TEXT DEFAULT 'active' CHECK(status IN ('active','inactive')),
       joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      removed_at DATETIME,
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (company_id) REFERENCES companies(id),
       UNIQUE(user_id, company_id)
     )
   `)
+
+  // Add removed_at column to existing team_memberships (preserves history)
+  try { db.run('ALTER TABLE team_memberships ADD COLUMN removed_at DATETIME') } catch {}
+
+  // Add removed_at column to users to track when direct members were deactivated
+  try { db.run('ALTER TABLE users ADD COLUMN removed_at DATETIME') } catch {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS team_invites (

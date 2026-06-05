@@ -1062,18 +1062,67 @@ router.delete('/team/:id', authMiddleware, requireRole('gestor'), (req, res) => 
 
   // Check if this is a direct company member
   const directMember = get('SELECT id FROM users WHERE id = ? AND company_id = ?', [uid, cid])
+  const now = new Date().toISOString()
 
   if (directMember) {
-    // Direct member: deactivate
-    run('UPDATE users SET active = 0 WHERE id = ? AND company_id = ?', [uid, cid])
+    // Direct member: deactivate AND record when (preserves historical data)
+    run('UPDATE users SET active = 0, removed_at = ? WHERE id = ? AND company_id = ?', [now, uid, cid])
   } else {
-    // Multi-team membership: remove the membership link
-    run('DELETE FROM team_memberships WHERE user_id = ? AND company_id = ?', [uid, cid])
-    // Also remove any pending invites
-    run("DELETE FROM team_invites WHERE editor_id = ? AND company_id = ?", [uid, cid])
+    // Multi-team membership: mark as inactive instead of deleting (preserves history)
+    run("UPDATE team_memberships SET status = 'inactive', removed_at = ? WHERE user_id = ? AND company_id = ?",
+      [now, uid, cid])
+    // Decline any pending invites (don't delete)
+    run("UPDATE team_invites SET status = 'declined' WHERE editor_id = ? AND company_id = ? AND status = 'pending'",
+      [uid, cid])
   }
 
+  run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
+    [cid, req.user.id, 'removed', 'editor', uid, 'Editor removido da equipe (historico preservado)'])
+
   res.json({ success: true })
+})
+
+// Restore a removed editor back to the active team
+router.post('/team/:id/restore', authMiddleware, requireRole('gestor'), (req, res) => {
+  const uid = req.params.id
+  const cid = req.user.company_id
+
+  const directMember = get('SELECT id FROM users WHERE id = ? AND company_id = ?', [uid, cid])
+  if (directMember) {
+    run('UPDATE users SET active = 1, removed_at = NULL WHERE id = ? AND company_id = ?', [uid, cid])
+  } else {
+    run("UPDATE team_memberships SET status = 'active', removed_at = NULL WHERE user_id = ? AND company_id = ?", [uid, cid])
+  }
+
+  run('INSERT INTO activity_log (company_id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)',
+    [cid, req.user.id, 'restored', 'editor', uid, 'Editor restaurado para a equipe'])
+
+  res.json({ success: true })
+})
+
+// List removed editors (for restore UI)
+router.get('/team/removed', authMiddleware, requireRole('gestor'), (req, res) => {
+  const cid = req.user.company_id
+
+  // Direct removed users
+  const directRemoved = all(
+    `SELECT u.id, u.name, u.email, u.role, u.avatar, u.removed_at, 'direct' as membership_type
+     FROM users u WHERE u.company_id = ? AND u.active = 0 AND u.role IN ('editor','supervisor')
+     ORDER BY u.removed_at DESC NULLS LAST, u.name`,
+    [cid]
+  )
+
+  // Removed team memberships
+  const removedMemberships = all(
+    `SELECT u.id, u.name, u.email, u.role, u.avatar, tm.removed_at, 'membership' as membership_type
+     FROM team_memberships tm
+     JOIN users u ON u.id = tm.user_id
+     WHERE tm.company_id = ? AND tm.status = 'inactive'
+     ORDER BY tm.removed_at DESC NULLS LAST, u.name`,
+    [cid]
+  )
+
+  res.json([...directRemoved, ...removedMemberships])
 })
 
 // ============ TEAM INVITES (multi-team) ============
@@ -1313,10 +1362,14 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
     ORDER BY (total_order_value + total_entry_value) DESC
   `, [cid, startDate, endDate, cid, startDate, endDate, cid, cid, cid, cid, cid, startDate, endDate, cid, startDate, endDate, cid])
 
-  // Per-editor summary (includes both direct editors AND team membership editors)
+  // Per-editor summary — includes ANY editor (active or removed) that had orders OR
+  // payment activity (batches) for this company during this month. This preserves the
+  // historical view of removed editors. Active filter only matters for "current team" lists.
   const perEditor = all(`
     SELECT u.id as editor_id, u.name as editor_name,
-      COUNT(o.id) as total_orders,
+      u.active as editor_active,
+      COALESCE(u.removed_at, (SELECT tm.removed_at FROM team_memberships tm WHERE tm.user_id = u.id AND tm.company_id = ? LIMIT 1)) as editor_removed_at,
+      COUNT(DISTINCT o.id) as total_orders,
       COALESCE(SUM(o.editor_value), 0) as total_value,
       COALESCE((SELECT SUM(epi.amount) FROM editor_payment_items epi
         JOIN editor_payment_batches epb ON epb.id = epi.batch_id
@@ -1327,12 +1380,29 @@ router.get('/financial/overview', authMiddleware, requireRole('gestor'), (req, r
     FROM users u
     LEFT JOIN orders o ON o.editor_id = u.id AND o.company_id = ?
       AND DATE(o.updated_at) BETWEEN ? AND ?
-    WHERE (u.company_id = ? OR u.id IN (SELECT user_id FROM team_memberships WHERE company_id = ? AND status = 'active'))
-      AND u.role = 'editor' AND u.active = 1
+    WHERE u.role = 'editor'
+      AND (
+        -- Currently on team (direct or membership)
+        (u.company_id = ? AND u.active = 1)
+        OR u.id IN (SELECT user_id FROM team_memberships WHERE company_id = ? AND status = 'active')
+        -- OR previously on team and had activity in this month
+        OR u.id IN (
+          SELECT DISTINCT o2.editor_id FROM orders o2
+          WHERE o2.company_id = ? AND DATE(o2.updated_at) BETWEEN ? AND ?
+        )
+        OR u.id IN (
+          SELECT DISTINCT epb2.editor_id FROM editor_payment_batches epb2
+          WHERE epb2.company_id = ?
+            AND (DATE(epb2.created_at) BETWEEN ? AND ? OR DATE(epb2.paid_at) BETWEEN ? AND ?)
+        )
+      )
     GROUP BY u.id
     HAVING total_orders > 0
-    ORDER BY total_value DESC
-  `, [cid, cid, cid, startDate, endDate, cid, cid])
+       OR EXISTS (SELECT 1 FROM editor_payment_batches epb3
+                  WHERE epb3.editor_id = u.id AND epb3.company_id = ?
+                  AND (DATE(epb3.created_at) BETWEEN ? AND ? OR DATE(epb3.paid_at) BETWEEN ? AND ?))
+    ORDER BY editor_active DESC, total_value DESC
+  `, [cid, cid, cid, cid, startDate, endDate, cid, cid, cid, startDate, endDate, cid, startDate, endDate, startDate, endDate, cid, startDate, endDate, startDate, endDate])
 
   // Totals (orders + standalone entries)
   const totals = get(`
@@ -1492,15 +1562,40 @@ router.get('/financial/editor-sheet/:editorId', authMiddleware, requireRole('ges
   const startDate = `${month}-01`
   const endDate = `${month}-31`
 
-  // Editor can be a direct member (company_id match) or a team membership member
+  // Editor can be a direct member (active or removed) OR a team membership (active or inactive)
+  // Removed editors are still accessible so we can view their historical work/payments
   let editor = get('SELECT * FROM users WHERE id = ? AND company_id = ?', [editorId, cid])
   if (!editor) {
-    // Check team_memberships for shared editors from other companies
-    const membership = get('SELECT tm.*, u.name, u.email, u.role, u.phone, u.specialty, u.default_rate, u.avatar FROM team_memberships tm JOIN users u ON u.id = tm.user_id WHERE tm.user_id = ? AND tm.company_id = ? AND tm.status = ?', [editorId, cid, 'active'])
+    // Check team_memberships (any status) for shared editors from other companies
+    const membership = get(
+      `SELECT tm.*, u.name, u.email, u.role, u.phone, u.specialty, u.default_rate, u.avatar, u.active
+       FROM team_memberships tm JOIN users u ON u.id = tm.user_id
+       WHERE tm.user_id = ? AND tm.company_id = ?`,
+      [editorId, cid]
+    )
     if (membership) {
-      editor = { id: membership.user_id, name: membership.name, email: membership.email, role: membership.role, phone: membership.phone, specialty: membership.specialty, default_rate: membership.default_rate, avatar: membership.avatar, company_id: cid }
+      editor = {
+        id: membership.user_id, name: membership.name, email: membership.email,
+        role: membership.role, phone: membership.phone, specialty: membership.specialty,
+        default_rate: membership.default_rate, avatar: membership.avatar,
+        company_id: cid, active: membership.status === 'active' ? 1 : 0,
+        removed_at: membership.removed_at,
+      }
     }
   }
+
+  // Last resort: any user with activity (orders or payments) in this company
+  if (!editor) {
+    const hasActivity = get(
+      `SELECT u.* FROM users u WHERE u.id = ? AND (
+        EXISTS (SELECT 1 FROM orders WHERE editor_id = u.id AND company_id = ?)
+        OR EXISTS (SELECT 1 FROM editor_payment_batches WHERE editor_id = u.id AND company_id = ?)
+      )`,
+      [editorId, cid, cid]
+    )
+    if (hasActivity) editor = hasActivity
+  }
+
   if (!editor) return res.status(404).json({ error: 'Editor não encontrado' })
 
   // Orders for this editor in this month (use updated_at OR created_at to capture both

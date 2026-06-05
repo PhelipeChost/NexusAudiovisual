@@ -140,9 +140,11 @@ const api = {
 
   team: {
     list: () => request('/team'),
+    listRemoved: () => request('/team/removed'),
     create: (data) => request('/team', { method: 'POST', body: JSON.stringify(data) }),
     update: (id, data) => request(`/team/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     delete: (id) => request(`/team/${id}`, { method: 'DELETE' }),
+    restore: (id) => request(`/team/${id}/restore`, { method: 'POST' }),
     invite: (email) => request('/team/invite', { method: 'POST', body: JSON.stringify({ email }) }),
     getInvites: () => request('/team/invites'),
     acceptInvite: (id) => request(`/team/invite/${id}/accept`, { method: 'POST' }),

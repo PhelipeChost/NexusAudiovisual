@@ -11,14 +11,16 @@ import {
 
 export default function Team() {
   const [members, setMembers] = useState([])
+  const [removed, setRemoved] = useState([])
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
+  const [showRemoved, setShowRemoved] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [inviteResult, setInviteResult] = useState(null)
   const [pendingInvites, setPendingInvites] = useState([])
 
-  useEffect(() => { loadTeam(); loadInvites() }, [])
+  useEffect(() => { loadTeam(); loadInvites(); loadRemoved() }, [])
 
   async function loadTeam() {
     try {
@@ -29,6 +31,20 @@ export default function Team() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function loadRemoved() {
+    try {
+      const data = await api.team.listRemoved()
+      setRemoved(data || [])
+    } catch (err) { console.error(err) }
+  }
+
+  async function handleRestore(id) {
+    try {
+      await api.team.restore(id)
+      loadTeam(); loadRemoved()
+    } catch (err) { alert(err.message) }
   }
 
   async function loadInvites() {
@@ -104,7 +120,7 @@ export default function Team() {
 
       {loading ? <Spinner /> : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 14 }}>
-          {members.map(m => <EditorCard key={m.id} member={m} onRefresh={loadTeam} />)}
+          {members.map(m => <EditorCard key={m.id} member={m} onRefresh={() => { loadTeam(); loadRemoved() }} />)}
 
           <button onClick={() => { setShowInvite(true); setInviteEmail(''); setInviteResult(null) }} style={{
             padding: 20,
@@ -130,6 +146,63 @@ export default function Team() {
               Convide por email um editor que já tem conta no Nexus
             </div>
           </button>
+        </div>
+      )}
+
+      {/* Editores removidos — histórico preservado */}
+      {removed.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => setShowRemoved(s => !s)} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 14px', borderRadius: 8,
+            background: theme.colors.bgSecondary,
+            border: `1px solid ${theme.colors.border}`,
+            color: theme.colors.textMuted, fontSize: 13,
+            cursor: 'pointer',
+          }}>
+            <Icon name={showRemoved ? 'chevronDown' : 'chevronRight'} size={12} />
+            <span>Editores removidos ({removed.length})</span>
+            <span style={{ fontSize: 11, color: theme.colors.textFaint, marginLeft: 'auto' }}>
+              historico preservado
+            </span>
+          </button>
+
+          {showRemoved && (
+            <div style={{
+              marginTop: 10,
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10,
+            }}>
+              {removed.map(r => (
+                <div key={r.id} style={{
+                  ...panelStyle, padding: 14, opacity: 0.85,
+                  display: 'flex', alignItems: 'center', gap: 12,
+                }}>
+                  <Avatar name={r.name} src={r.avatar || undefined} size={36} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, color: theme.colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: theme.colors.textMuted, fontFamily: theme.fonts.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.email || '—'}
+                    </div>
+                    {r.removed_at && (
+                      <div className="eyebrow" style={{ marginTop: 2, fontSize: 9 }}>
+                        removido {new Date(r.removed_at).toLocaleDateString('pt-BR')}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => handleRestore(r.id)} title="Restaurar"
+                    style={{
+                      padding: '6px 10px', fontSize: 11, fontWeight: 600,
+                      background: theme.colors.primaryMuted, color: theme.colors.primary,
+                      borderRadius: 6, cursor: 'pointer',
+                    }}>
+                    Restaurar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
