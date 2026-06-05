@@ -4208,13 +4208,22 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
     economia: fixedCosts.filter(e => e.category === 'economia'),
   }
 
+  // Avulsas (compras do dia a dia)
+  const avulsas = all(`
+    SELECT * FROM personal_avulsas
+    WHERE user_id = ? AND entry_date BETWEEN ? AND ?
+    ORDER BY entry_date DESC, created_at DESC
+  `, [uid, startDate, endDate])
+
+  const totalAvulsas = avulsas.reduce((s, e) => s + (e.amount || 0), 0)
+
   const totalNecessidade = expensesByCategory.necessidade.reduce((s, e) => s + (e.amount || 0), 0)
     + fixedByCategory.necessidade.reduce((s, e) => s + (e.amount || 0), 0)
   const totalDesejo = expensesByCategory.desejo.reduce((s, e) => s + (e.amount || 0), 0)
     + fixedByCategory.desejo.reduce((s, e) => s + (e.amount || 0), 0)
   const totalEconomia = expensesByCategory.economia.reduce((s, e) => s + (e.amount || 0), 0)
     + fixedByCategory.economia.reduce((s, e) => s + (e.amount || 0), 0)
-  const totalExpenses = totalNecessidade + totalDesejo + totalEconomia
+  const totalExpenses = totalNecessidade + totalDesejo + totalEconomia + totalAvulsas
 
   const totalIncome = totalPlatformIncome + totalManualIncome
   const balance = totalIncome - totalExpenses
@@ -4228,6 +4237,7 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
     totalNecessidade,
     totalDesejo,
     totalEconomia,
+    totalAvulsas,
     balance,
     totalPendingPlatform,
     platformIncome,
@@ -4236,6 +4246,7 @@ router.get('/personal-finance', authMiddleware, requireRole('gestor', 'editor'),
     incomeEntries,
     expensesByCategory,
     fixedByCategory,
+    avulsas,
   })
 })
 
@@ -4391,6 +4402,39 @@ router.delete('/personal-finance/fixed-costs/:id', authMiddleware, requireRole('
   const fc = get('SELECT * FROM personal_fixed_costs WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
   if (!fc) return res.status(404).json({ error: 'Custo fixo não encontrado' })
   run('DELETE FROM personal_fixed_costs WHERE id = ?', [req.params.id])
+  res.json({ success: true })
+})
+
+// ============ PERSONAL AVULSAS (compras avulsas do dia a dia) ============
+
+router.post('/personal-finance/avulsas', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { name, amount, entry_date } = req.body
+  if (!name || !amount) return res.status(400).json({ error: 'Nome e valor são obrigatórios' })
+
+  const parsedAmount = parseFloat(amount)
+  if (isNaN(parsedAmount) || parsedAmount <= 0) return res.status(400).json({ error: 'Valor deve ser maior que zero' })
+
+  const result = run(
+    'INSERT INTO personal_avulsas (user_id, name, amount, entry_date) VALUES (?, ?, ?, ?)',
+    [req.user.id, name, parsedAmount, entry_date || new Date().toISOString().substring(0, 10)]
+  )
+  res.json(get('SELECT * FROM personal_avulsas WHERE id = ?', [result.lastInsertRowid]))
+})
+
+router.put('/personal-finance/avulsas/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const { name, amount, entry_date } = req.body
+  const av = get('SELECT * FROM personal_avulsas WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!av) return res.status(404).json({ error: 'Compra não encontrada' })
+
+  run('UPDATE personal_avulsas SET name = COALESCE(?, name), amount = COALESCE(?, amount), entry_date = COALESCE(?, entry_date) WHERE id = ?',
+    [name || null, amount ? parseFloat(amount) : null, entry_date || null, req.params.id])
+  res.json(get('SELECT * FROM personal_avulsas WHERE id = ?', [req.params.id]))
+})
+
+router.delete('/personal-finance/avulsas/:id', authMiddleware, requireRole('gestor', 'editor'), (req, res) => {
+  const av = get('SELECT * FROM personal_avulsas WHERE id = ? AND user_id = ?', [req.params.id, req.user.id])
+  if (!av) return res.status(404).json({ error: 'Compra não encontrada' })
+  run('DELETE FROM personal_avulsas WHERE id = ?', [req.params.id])
   res.json({ success: true })
 })
 

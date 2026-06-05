@@ -261,6 +261,9 @@ const api = {
     createFixedCost: (data) => request('/personal-finance/fixed-costs', { method: 'POST', body: JSON.stringify(data) }),
     updateFixedCost: (id, data) => request(`/personal-finance/fixed-costs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteFixedCost: (id) => request(`/personal-finance/fixed-costs/${id}`, { method: 'DELETE' }),
+    createAvulsa: (data) => request('/personal-finance/avulsas', { method: 'POST', body: JSON.stringify(data) }),
+    updateAvulsa: (id, data) => request(`/personal-finance/avulsas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteAvulsa: (id) => request(`/personal-finance/avulsas/${id}`, { method: 'DELETE' }),
   },
 }
 

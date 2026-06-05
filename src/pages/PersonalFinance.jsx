@@ -69,9 +69,11 @@ export default function PersonalFinance() {
   const {
     totalIncome = 0, totalPlatformIncome = 0, totalManualIncome = 0,
     totalExpenses = 0, totalNecessidade = 0, totalDesejo = 0, totalEconomia = 0,
+    totalAvulsas = 0,
     balance = 0, totalPendingPlatform = 0,
     platformIncome = [], legacyPayments = [], pendingPlatformWork = [],
     incomeEntries = [], expensesByCategory = {}, fixedByCategory = {},
+    avulsas = [],
   } = data || {}
 
   const pctN = totalIncome > 0 ? Math.round((totalNecessidade / totalIncome) * 100) : 0
@@ -96,11 +98,14 @@ export default function PersonalFinance() {
     })),
   ]
 
+  const AVULSA_META = { label: 'Avulsas', color: '#e17055', bg: '#fde4dc' }
+
   const columns = [
     { key: 'entradas', label: 'Entradas', headerColor: '#e0e0e0', totalColor: '#e0e0e0' },
     { key: 'necessidade', ...CAT.necessidade },
     { key: 'desejo', ...CAT.desejo },
     { key: 'economia', ...CAT.economia },
+    { key: 'avulsa', ...AVULSA_META },
   ]
 
   return (
@@ -216,8 +221,8 @@ export default function PersonalFinance() {
       {/* ── Spreadsheet Tables ── */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)',
-        gap: isMobile ? 0 : 14,
+        gridTemplateColumns: isMobile ? '1fr' : 'repeat(5, 1fr)',
+        gap: isMobile ? 0 : 12,
         alignItems: 'start',
       }}>
         {/* Entradas column */}
@@ -274,6 +279,24 @@ export default function PersonalFinance() {
             />
           )
         })}
+
+        {/* Compras avulsas */}
+        {(!isMobile || mobileTab === 'avulsa') && (
+          <AvulsaTable
+            meta={AVULSA_META}
+            items={avulsas}
+            total={totalAvulsas}
+            month={month}
+            onAdd={async (name, amount) => {
+              await api.personalFinance.createAvulsa({
+                name, amount,
+                entry_date: new Date().toISOString().substring(0, 10),
+              })
+              load()
+            }}
+            onDelete={async (id) => { await api.personalFinance.deleteAvulsa(id); load() }}
+          />
+        )}
       </div>
     </div>
   )
@@ -541,6 +564,103 @@ function ExpenseTable({ category, meta, items, fixedCosts, total, month, onAddEx
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+
+/* ═══════════════════════════════════════
+   AvulsaTable — compras avulsas do dia a dia
+   ═══════════════════════════════════════ */
+function AvulsaTable({ meta, items, total, onAdd, onDelete }) {
+  const [draft, setDraft] = useState({ name: '', amount: '' })
+  const nameRef = useRef(null)
+
+  async function submit() {
+    if (!draft.name.trim() || !draft.amount) return
+    try {
+      await onAdd(draft.name.trim(), parseFloat(draft.amount))
+      setDraft({ name: '', amount: '' })
+      nameRef.current?.focus()
+    } catch (err) { alert(err.message) }
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); submit() }
+  }
+
+  // Group items by day for visual organization
+  const byDay = {}
+  for (const it of items) {
+    const d = it.entry_date || '—'
+    if (!byDay[d]) byDay[d] = []
+    byDay[d].push(it)
+  }
+  const days = Object.keys(byDay).sort((a, b) => b.localeCompare(a))
+
+  return (
+    <div style={{ ...panelStyle, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...headerCell(meta.bg) }}>
+        <span style={{ color: meta.color }}>{meta.label}</span>
+        <span style={{ textAlign: 'right', color: meta.color }}>Valor</span>
+      </div>
+
+      {/* Items grouped by day */}
+      {days.map(day => (
+        <div key={day}>
+          {day !== '—' && (
+            <div style={{
+              padding: '4px 10px', fontSize: 10, color: meta.color,
+              background: `${meta.color}10`,
+              fontFamily: 'monospace', letterSpacing: '0.04em',
+              borderBottom: `1px solid ${theme.colors.borderSoft}`,
+            }}>
+              {new Date(day + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
+            </div>
+          )}
+          {byDay[day].map(av => (
+            <div key={av.id}
+              style={{ display: 'grid', gridTemplateColumns: '1fr 90px 20px', ...cellBase }}
+              className="row-hover">
+              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {av.name}
+              </div>
+              <div className="mono tnum" style={{ textAlign: 'right' }}>{fmtBRL(av.amount)}</div>
+              <button onClick={() => onDelete(av.id)} style={{ padding: 0, color: theme.colors.textFaint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="x" size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {/* Inline new row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...cellBase, borderBottom: 'none', background: theme.colors.bgSecondary }}>
+        <input
+          ref={nameRef}
+          value={draft.name}
+          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          onKeyDown={onKeyDown}
+          placeholder="Nova compra..."
+          style={{ ...cellInput, color: theme.colors.textMuted }}
+        />
+        <input
+          value={draft.amount}
+          onChange={e => setDraft(d => ({ ...d, amount: e.target.value }))}
+          onKeyDown={onKeyDown}
+          onBlur={submit}
+          placeholder="0,00"
+          type="number" step="0.01" min="0"
+          style={{ ...cellInput, textAlign: 'right', color: theme.colors.textMuted }}
+        />
+      </div>
+
+      {/* Total */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', ...totalRow(meta.bg) }}>
+        <span style={{ color: meta.color }}>Total</span>
+        <span className="mono tnum" style={{ textAlign: 'right', color: meta.color }}>{fmtBRL(total)}</span>
       </div>
     </div>
   )

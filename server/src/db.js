@@ -686,6 +686,18 @@ async function initDb() {
   try { db.run('ALTER TABLE personal_expenses ADD COLUMN installment_group TEXT') } catch {}
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS personal_avulsas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      entry_date DATE DEFAULT (DATE('now')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `)
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS personal_fixed_costs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
