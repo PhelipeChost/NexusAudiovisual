@@ -1,21 +1,81 @@
 import initSqlJs from 'sql.js'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, renameSync, statSync, mkdirSync, readdirSync, unlinkSync, copyFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const DB_PATH = join(__dirname, '..', 'database.sqlite')
+const DB_TMP_PATH = join(__dirname, '..', 'database.sqlite.tmp')
+const BACKUP_DIR = join(__dirname, '..', 'backups')
+const MAX_BACKUPS = 14 // keep 2 weeks of daily backups
 
 let db
+
+// Verify SQLite file integrity by checking the "SQLite format 3" magic header
+function isValidSQLiteFile(path) {
+  try {
+    const buf = readFileSync(path, { encoding: null })
+    if (buf.length < 16) return false
+    // SQLite header: "SQLite format 3\0"
+    return buf.slice(0, 15).toString() === 'SQLite format 3'
+  } catch { return false }
+}
+
+// Try to load DB from a path, returning the SQL.Database instance or null
+function tryLoadDb(SQL, path) {
+  if (!existsSync(path)) return null
+  if (!isValidSQLiteFile(path)) {
+    console.error(`[db] File ${path} exists but is not a valid SQLite database — skipping`)
+    return null
+  }
+  try {
+    const buffer = readFileSync(path)
+    return new SQL.Database(buffer)
+  } catch (err) {
+    console.error(`[db] Failed to load ${path}:`, err.message)
+    return null
+  }
+}
 
 async function initDb() {
   const SQL = await initSqlJs()
 
-  if (existsSync(DB_PATH)) {
-    const buffer = readFileSync(DB_PATH)
-    db = new SQL.Database(buffer)
-  } else {
+  // Try main DB file first
+  db = tryLoadDb(SQL, DB_PATH)
+
+  // If main DB is missing or corrupted, attempt recovery from most recent backup
+  if (!db) {
+    if (existsSync(DB_PATH)) {
+      // Quarantine the corrupted file
+      const quarantinePath = `${DB_PATH}.corrupted-${Date.now()}`
+      try {
+        renameSync(DB_PATH, quarantinePath)
+        console.error(`[db] Corrupted DB moved to ${quarantinePath}`)
+      } catch (err) { console.error('[db] Failed to quarantine corrupted file:', err.message) }
+    }
+
+    // Find most recent valid backup
+    if (existsSync(BACKUP_DIR)) {
+      const backups = readdirSync(BACKUP_DIR)
+        .filter(f => f.startsWith('database-') && f.endsWith('.sqlite'))
+        .sort()
+        .reverse()
+      for (const backup of backups) {
+        const backupPath = join(BACKUP_DIR, backup)
+        const restored = tryLoadDb(SQL, backupPath)
+        if (restored) {
+          console.log(`[db] Restored database from backup: ${backup}`)
+          db = restored
+          break
+        }
+      }
+    }
+  }
+
+  // Last resort: fresh empty DB
+  if (!db) {
+    console.log('[db] Creating fresh empty database')
     db = new SQL.Database()
   }
 
@@ -722,12 +782,66 @@ async function initDb() {
   return db
 }
 
+// Atomic write: write to temp file, then rename. If the process is killed
+// mid-write, the temp file is corrupted but the main DB file remains intact.
 function saveDb() {
-  if (db) {
-    const data = db.export()
-    const buffer = Buffer.from(data)
-    writeFileSync(DB_PATH, buffer)
+  if (!db) return
+  const data = db.export()
+  const buffer = Buffer.from(data)
+
+  // Sanity check: never write a buffer that doesn't start with SQLite magic
+  if (buffer.length < 16 || buffer.slice(0, 15).toString() !== 'SQLite format 3') {
+    console.error('[db] REFUSING to save: exported buffer has invalid SQLite header')
+    return
   }
+
+  try {
+    writeFileSync(DB_TMP_PATH, buffer)
+    renameSync(DB_TMP_PATH, DB_PATH) // atomic on POSIX
+  } catch (err) {
+    console.error('[db] Failed to save database:', err.message)
+    try { if (existsSync(DB_TMP_PATH)) unlinkSync(DB_TMP_PATH) } catch {}
+  }
+}
+
+// Create a daily snapshot in backups/. Runs in-process on a 24h timer.
+function backupDb() {
+  if (!db) return
+  try {
+    if (!existsSync(BACKUP_DIR)) mkdirSync(BACKUP_DIR, { recursive: true })
+
+    const today = new Date().toISOString().substring(0, 10) // YYYY-MM-DD
+    const backupPath = join(BACKUP_DIR, `database-${today}.sqlite`)
+
+    // Skip if today's backup already exists
+    if (existsSync(backupPath)) return
+
+    // Copy current valid DB file (cheaper than re-exporting)
+    if (existsSync(DB_PATH) && isValidSQLiteFile(DB_PATH)) {
+      copyFileSync(DB_PATH, backupPath)
+      console.log(`[db] Backup created: ${backupPath}`)
+    }
+
+    // Rotate: keep only MAX_BACKUPS most recent
+    const backups = readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith('database-') && f.endsWith('.sqlite'))
+      .sort()
+    while (backups.length > MAX_BACKUPS) {
+      const old = backups.shift()
+      try { unlinkSync(join(BACKUP_DIR, old)); console.log(`[db] Removed old backup: ${old}`) } catch {}
+    }
+  } catch (err) {
+    console.error('[db] Backup failed:', err.message)
+  }
+}
+
+// Start daily backup timer (runs on boot then every 24h)
+function startBackupSchedule() {
+  // Run first backup 30s after boot (so the DB has finished initializing/migrating)
+  setTimeout(() => {
+    backupDb()
+    setInterval(backupDb, 24 * 60 * 60 * 1000)
+  }, 30 * 1000)
 }
 
 function getDb() {
@@ -797,4 +911,4 @@ function createDefaultColumns(companyId, clientId) {
   }
 }
 
-export { initDb, getDb, run, get, all, createDefaultColumns, saveDb }
+export { initDb, getDb, run, get, all, createDefaultColumns, saveDb, backupDb, startBackupSchedule }

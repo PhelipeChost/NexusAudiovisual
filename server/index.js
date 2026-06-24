@@ -3,7 +3,7 @@ import cors from 'cors'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
-import { initDb } from './src/db.js'
+import { initDb, startBackupSchedule } from './src/db.js'
 import apiRouter from './src/api.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -32,6 +32,7 @@ if (existsSync(distPath)) {
 
 async function start() {
   await initDb()
+  startBackupSchedule()
   app.listen(PORT, () => {
     console.log(`Audiovisual Nexus API running on port ${PORT}`)
     if (BASE_PATH) console.log(`Base path: ${BASE_PATH}`)
