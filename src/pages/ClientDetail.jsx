@@ -894,22 +894,35 @@ function OrderDetail({
         borderBottom: `1px solid ${theme.colors.border}`,
       }}>
         {[
-          { k: 'Prazo', v: order.due_date ? (
+          { k: 'Prazo', v: isGestor ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="date"
+                value={order.due_date ? order.due_date.substring(0, 10) : ''}
+                onChange={e => onUpdate('due_date', e.target.value || null)}
+                style={{
+                  background: 'transparent',
+                  border: `1px dashed ${overdue ? theme.colors.danger : theme.colors.border}`,
+                  borderRadius: 4, outline: 'none', padding: '2px 6px',
+                  color: order.due_date ? (overdue ? theme.colors.danger : theme.colors.text) : theme.colors.primary,
+                  fontSize: 12, cursor: 'pointer',
+                  fontFamily: theme.fonts.mono,
+                  colorScheme: 'dark',
+                }}
+                title="Clique para alterar a data de entrega"
+              />
+              {order.due_date && overdue && (
+                <span style={{ fontSize: 11, color: theme.colors.danger }}>{Math.abs(d)}d atraso</span>
+              )}
+              {order.due_date && !overdue && d === 0 && (
+                <span style={{ fontSize: 11, color: theme.colors.gold }}>hoje</span>
+              )}
+            </div>
+          ) : order.due_date ? (
             <span style={{ color: overdue ? theme.colors.danger : theme.colors.text }} className="tnum">
               {new Date(order.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
               {overdue && <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.danger }}>{Math.abs(d)}d atraso</span>}
             </span>
-          ) : isGestor ? (
-            <input
-              type="date"
-              onChange={e => { if (e.target.value) onUpdate('due_date', e.target.value) }}
-              style={{
-                background: 'transparent', border: `1px dashed ${theme.colors.border}`,
-                borderRadius: 4, outline: 'none', padding: '2px 6px',
-                color: theme.colors.primary, fontSize: 12, cursor: 'pointer',
-                fontFamily: theme.fonts.mono,
-              }}
-            />
           ) : <span style={{ color: theme.colors.textFaint }}>Sem prazo</span> },
           { k: 'Editor', v: (
             <select value={order.editor_id || ''}
