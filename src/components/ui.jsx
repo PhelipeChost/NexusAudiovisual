@@ -363,3 +363,35 @@ export function daysUntil(dateStr) {
   due.setHours(0,0,0,0)
   return Math.round((due - today) / (1000 * 60 * 60 * 24))
 }
+
+// Case- and accent-insensitive column-name check
+export function isFinalized(columnName) {
+  if (!columnName) return false
+  return columnName.toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '') === 'finalizado'
+}
+
+// Compute delivery status for an order. Returns one of:
+//   { kind: 'none' }                                 no due_date set
+//   { kind: 'delivered_on_time', deliveredAt }       finalized, delivered on/before due_date
+//   { kind: 'delivered_late', deliveredAt, lateDays } finalized, delivered after due_date
+//   { kind: 'overdue', lateDays }                    not finalized, past due_date
+//   { kind: 'today' }                                not finalized, due today
+//   { kind: 'upcoming', daysLeft }                   not finalized, still ahead of due_date
+export function deliveryStatus(order) {
+  if (!order?.due_date) return { kind: 'none' }
+  const due = new Date(order.due_date); due.setHours(0,0,0,0)
+
+  if (isFinalized(order.column_name)) {
+    const delivered = new Date(order.updated_at || Date.now()); delivered.setHours(0,0,0,0)
+    const diff = Math.round((delivered - due) / (1000 * 60 * 60 * 24))
+    return diff > 0
+      ? { kind: 'delivered_late', deliveredAt: order.updated_at, lateDays: diff }
+      : { kind: 'delivered_on_time', deliveredAt: order.updated_at }
+  }
+
+  const today = new Date(); today.setHours(0,0,0,0)
+  const diff = Math.round((due - today) / (1000 * 60 * 60 * 24))
+  if (diff < 0) return { kind: 'overdue', lateDays: Math.abs(diff) }
+  if (diff === 0) return { kind: 'today' }
+  return { kind: 'upcoming', daysLeft: diff }
+}

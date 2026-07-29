@@ -11,7 +11,7 @@ import OrderComments from '../components/OrderComments'
 import {
   Icon, Avatar, Spinner, Field,
   inputStyle, btnPrimary, btnSoft, btnGhost, btnDanger,
-  panelStyle, PRIORITY, fmtBRL, daysUntil,
+  panelStyle, PRIORITY, fmtBRL, daysUntil, deliveryStatus, isFinalized,
 } from '../components/ui'
 import useIsMobile from '../hooks/useIsMobile'
 
@@ -624,9 +624,9 @@ export default function ClientDetail() {
 }
 
 function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
-  const d = daysUntil(order.due_date)
-  const overdue = d != null && d < 0
-  const today = d === 0
+  const status = deliveryStatus(order)
+  const overdue = status.kind === 'overdue' // only for NON-finalized past-due orders
+  const today = status.kind === 'today'
   const [showPreview, setShowPreview] = useState(false)
   const [previewPos, setPreviewPos] = useState({ horizontal: 'right', vertical: 'top' })
   const hoverTimer = useRef(null)
@@ -723,14 +723,30 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: theme.colors.textMuted, flexWrap: 'wrap' }}>
-        {order.due_date && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: overdue ? theme.colors.danger : today ? theme.colors.warm : theme.colors.textMuted }}>
-            <Icon name="clock" size={11} />
-            <span className="mono tnum">
-              {overdue ? `${Math.abs(d)}d atraso` : today ? 'hoje' : new Date(order.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}
-            </span>
-          </div>
-        )}
+        {order.due_date && (() => {
+          let color = theme.colors.textMuted, label = ''
+          if (status.kind === 'delivered_on_time') {
+            color = theme.colors.mint
+            label = `entregue ${new Date(status.deliveredAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`
+          } else if (status.kind === 'delivered_late') {
+            color = theme.colors.warm
+            label = `entregue com ${status.lateDays}d de atraso`
+          } else if (status.kind === 'overdue') {
+            color = theme.colors.danger
+            label = `${status.lateDays}d atraso`
+          } else if (status.kind === 'today') {
+            color = theme.colors.warm
+            label = 'hoje'
+          } else {
+            label = new Date(order.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+          }
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, color }}>
+              <Icon name="clock" size={11} />
+              <span className="mono tnum">{label}</span>
+            </div>
+          )
+        })()}
         {order.drive_links && <Icon name="drive" size={11} color={theme.colors.textFaint} />}
       </div>
 
@@ -773,10 +789,19 @@ function OrderCard({ order, onClick, onDragStart, onDragEnd }) {
             )}
             {order.due_date && (
               <div style={{ display: 'flex', gap: 8 }}>
-                <span style={{ color: theme.colors.textFaint, minWidth: 70 }}>Prazo:</span>
-                <span style={{ color: overdue ? theme.colors.danger : theme.colors.text }}>
+                <span style={{ color: theme.colors.textFaint, minWidth: 70 }}>
+                  {status.kind === 'delivered_on_time' || status.kind === 'delivered_late' ? 'Entrega:' : 'Prazo:'}
+                </span>
+                <span style={{
+                  color: status.kind === 'delivered_on_time' ? theme.colors.mint
+                    : status.kind === 'delivered_late' ? theme.colors.warm
+                    : status.kind === 'overdue' ? theme.colors.danger
+                    : theme.colors.text,
+                }}>
                   {new Date(order.due_date).toLocaleDateString('pt-BR')}
-                  {overdue && ` (${Math.abs(d)}d atraso)`}
+                  {status.kind === 'delivered_on_time' && ` — entregue no prazo`}
+                  {status.kind === 'delivered_late' && ` — entregue com ${status.lateDays}d de atraso`}
+                  {status.kind === 'overdue' && ` (${status.lateDays}d atraso)`}
                 </span>
               </div>
             )}
@@ -823,8 +848,9 @@ function OrderDetail({
   onUpdate, onClose,
 }) {
   const isGestor = userRole === 'gestor'
+  const status = deliveryStatus(order)
+  const overdue = status.kind === 'overdue'
   const d = daysUntil(order.due_date)
-  const overdue = d != null && d < 0
   const column = columns.find(c => c.id === order.column_id)
 
   return (
@@ -894,8 +920,9 @@ function OrderDetail({
         borderBottom: `1px solid ${theme.colors.border}`,
       }}>
         {[
-          { k: 'Prazo', v: isGestor ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          { k: status.kind === 'delivered_on_time' || status.kind === 'delivered_late' ? 'Entrega' : 'Prazo',
+            v: isGestor ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <input
                 type="date"
                 value={order.due_date ? order.due_date.substring(0, 10) : ''}
@@ -904,24 +931,41 @@ function OrderDetail({
                   background: 'transparent',
                   border: `1px dashed ${overdue ? theme.colors.danger : theme.colors.border}`,
                   borderRadius: 4, outline: 'none', padding: '2px 6px',
-                  color: order.due_date ? (overdue ? theme.colors.danger : theme.colors.text) : theme.colors.primary,
+                  color: order.due_date
+                    ? (status.kind === 'delivered_on_time' ? theme.colors.mint
+                       : status.kind === 'delivered_late' ? theme.colors.warm
+                       : overdue ? theme.colors.danger
+                       : theme.colors.text)
+                    : theme.colors.primary,
                   fontSize: 12, cursor: 'pointer',
                   fontFamily: theme.fonts.mono,
                   colorScheme: 'dark',
                 }}
                 title="Clique para alterar a data de entrega"
               />
-              {order.due_date && overdue && (
-                <span style={{ fontSize: 11, color: theme.colors.danger }}>{Math.abs(d)}d atraso</span>
+              {status.kind === 'delivered_on_time' && (
+                <span style={{ fontSize: 11, color: theme.colors.mint }}>entregue no prazo</span>
               )}
-              {order.due_date && !overdue && d === 0 && (
+              {status.kind === 'delivered_late' && (
+                <span style={{ fontSize: 11, color: theme.colors.warm }}>entregue com {status.lateDays}d de atraso</span>
+              )}
+              {status.kind === 'overdue' && (
+                <span style={{ fontSize: 11, color: theme.colors.danger }}>{status.lateDays}d atraso</span>
+              )}
+              {status.kind === 'today' && (
                 <span style={{ fontSize: 11, color: theme.colors.gold }}>hoje</span>
               )}
             </div>
           ) : order.due_date ? (
-            <span style={{ color: overdue ? theme.colors.danger : theme.colors.text }} className="tnum">
+            <span style={{
+              color: status.kind === 'delivered_on_time' ? theme.colors.mint
+                : status.kind === 'delivered_late' ? theme.colors.warm
+                : overdue ? theme.colors.danger : theme.colors.text,
+            }} className="tnum">
               {new Date(order.due_date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
-              {overdue && <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.danger }}>{Math.abs(d)}d atraso</span>}
+              {status.kind === 'delivered_on_time' && <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.mint }}>entregue no prazo</span>}
+              {status.kind === 'delivered_late' && <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.warm }}>entregue com {status.lateDays}d de atraso</span>}
+              {status.kind === 'overdue' && <span style={{ marginLeft: 6, fontSize: 11, color: theme.colors.danger }}>{status.lateDays}d atraso</span>}
             </span>
           ) : <span style={{ color: theme.colors.textFaint }}>Sem prazo</span> },
           { k: 'Editor', v: (
